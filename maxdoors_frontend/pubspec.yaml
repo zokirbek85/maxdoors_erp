@@ -1,0 +1,60 @@
+name: maxdoors_erp
+description: MaxDoors ERP — Flutter frontend (PocketBase backend bilan)
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  file_picker: ^8.0.3
+  csv: ^6.0.0
+  path_provider: ^2.1.4
+  # State management
+  provider: ^6.1.2
+
+  # HTTP mijoz
+  http: ^1.2.2
+
+  # Mahalliy saqlash (JWT va rol)
+  shared_preferences: ^2.3.2
+
+  # Formatlar (sana/valyuta)
+  intl: ^0.20.2
+
+  # Barcode skaneri (kamera yoki hardware skaner bilan)
+  flutter_barcode_scanner: ^2.0.0
+
+  # PDF yaratish va chop etish (nakladnoy, hisobotlar)
+  pdf: ^3.11.0
+  printing: ^5.13.4
+
+  # iOS/Android uchun standart ikonka to‘plami (ixtiyoriy)
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/
+    
+  # Agar PNG/SVG rasmlar bo'lsa:
+  # assets:
+  #   - assets/images/logo.png
+
+  # Agar custom shriftlar ishlatsangiz:
+  # fonts:
+  #   - family: Inter
+  #     fonts:
+  #       - asset: assets/fonts/Inter-Regular.ttf
+  #       - asset: assets/fonts/Inter-Medium.ttf
+  #         weight: 500
+  #       - asset: assets/fonts/Inter-Bold.ttf
+  #         weight: 700

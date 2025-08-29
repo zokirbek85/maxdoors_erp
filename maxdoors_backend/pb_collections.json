@@ -1,0 +1,45 @@
+{
+"collections": [
+{
+"name": "dealer_balance_adjustments",
+"type": "base",
+"schema": [
+{"name": "dealer", "type": "relation", "required": true, "options": {"collectionId": "dealers", "maxSelect": 1}},
+{"name": "date", "type": "date", "required": true, "options": {}},
+{"name": "amount", "type": "number", "required": true, "options": {"noDecimal": false}},
+{"name": "note", "type": "text", "required": false, "options": {"max": 500}}
+],
+"indexes": [
+"CREATE INDEX IF NOT EXISTS idx_dba_dealer ON dealer_balance_adjustments(dealer)",
+"CREATE INDEX IF NOT EXISTS idx_dba_date ON dealer_balance_adjustments(date)"
+]
+},
+{
+"name": "return_entries",
+"type": "base",
+"schema": [
+{"name": "dealer", "type": "relation", "required": true, "options": {"collectionId": "dealers", "maxSelect": 1}},
+{"name": "date", "type": "date", "required": true, "options": {}},
+{"name": "note", "type": "text", "required": false, "options": {"max": 500}}
+],
+"indexes": [
+"CREATE INDEX IF NOT EXISTS idx_returns_dealer ON return_entries(dealer)",
+"CREATE INDEX IF NOT EXISTS idx_returns_date ON return_entries(date)"
+]
+},
+{
+"name": "return_items",
+"type": "base",
+"schema": [
+{"name": "return_entry", "type": "relation", "required": true, "options": {"collectionId": "return_entries", "maxSelect": 1}},
+{"name": "product", "type": "relation", "required": true, "options": {"collectionId": "products", "maxSelect": 1}},
+{"name": "qty", "type": "number", "required": true, "options": {"noDecimal": false}},
+{"name": "is_defect", "type": "bool", "required": false, "options": {}}
+],
+"indexes": [
+"CREATE INDEX IF NOT EXISTS idx_return_items_entry ON return_items(return_entry)",
+"CREATE INDEX IF NOT EXISTS idx_return_items_product ON return_items(product)"
+]
+}
+]
+}

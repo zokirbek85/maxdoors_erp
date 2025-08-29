@@ -1,0 +1,704 @@
+{
+  "info": {
+    "name": "MaxDoors ERP — API Validation (PocketBase)",
+    "_postman_id": "b9f7f1ac-0e1c-4b35-9a0c-maxdoors",
+    "description": "PocketBase backendini to‘liq tekshirish: kataloglar, kirim, buyurtma → approval → packed → shipped, to‘lovlar (UZS/USD, FX, FIFO, opening balance), qaytishlar, audit/loglar.\nAdmin token oldindan berilgan (UI \"superuser\" tokeni). Admin endpointga qayta login shart emas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8090" },
+
+    { "key": "admin_token", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzE0MjYzNTgyMyIsImV4cCI6MTc1NjQ5Mjg4NSwiaWQiOiI4NjU1OXUzcm1mc3FqYTciLCJyZWZyZXNoYWJsZSI6dHJ1ZSwidHlwZSI6ImF1dGgifQ.eydVO28x2miFtnqYrpSg5_9PEW6RJRiTHzcfAR5_VEo" },
+
+    { "key": "manager_email", "value": "manager@example.com" },
+    { "key": "manager_password", "value": "manager12345" },
+    { "key": "warehouse_email", "value": "warehouse@example.com" },
+    { "key": "warehouse_password", "value": "warehouse12345" },
+    { "key": "accountant_email", "value": "accountant@example.com" },
+    { "key": "accountant_password", "value": "accountant12345" },
+    { "key": "owner_email", "value": "owner@example.com" },
+    { "key": "owner_password", "value": "owner12345" },
+
+    { "key": "manager_token", "value": "" },
+    { "key": "warehouse_token", "value": "" },
+    { "key": "accountant_token", "value": "" },
+    { "key": "owner_token", "value": "" },
+
+    { "key": "manager_id", "value": "" },
+    { "key": "warehouse_id", "value": "" },
+    { "key": "accountant_id", "value": "" },
+    { "key": "owner_id", "value": "" },
+
+    { "key": "region_id", "value": "" },
+    { "key": "supplier_id", "value": "" },
+    { "key": "category_id", "value": "" },
+    { "key": "dealer_id", "value": "" },
+
+    { "key": "product_id", "value": "" },
+    { "key": "product_barcode", "value": "" },
+
+    { "key": "fx_date", "value": "" },
+    { "key": "fx_rate_id", "value": "" },
+
+    { "key": "stock_entry_id", "value": "" },
+    { "key": "stock_item_id", "value": "" },
+
+    { "key": "order_id", "value": "" },
+    { "key": "order_human", "value": "" },
+    { "key": "order_item_id", "value": "" },
+
+    { "key": "payment_id", "value": "" },
+
+    { "key": "dba_id", "value": "" },
+
+    { "key": "return_entry_id", "value": "" },
+    { "key": "return_item_id", "value": "" },
+
+    { "key": "edit_request_id", "value": "" },
+    { "key": "now_iso", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "00 Health (sanity)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/health"
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Health 200', ()=>pm.response.code===200);"
+        ], "type":"text/javascript" } }
+      ]
+    },
+
+    {
+      "name": "01 Create Users (Admin token)",
+      "item": [
+        {
+          "name": "Create Manager",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Admin {{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/users/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"email\": \"{{manager_email}}\",\n  \"password\": \"{{manager_password}}\",\n  \"passwordConfirm\": \"{{manager_password}}\",\n  \"role\": \"manager\",\n  \"is_active\": true\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Manager created', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201,409]));",
+              "if(pm.response.code===200||pm.response.code===201){pm.collectionVariables.set('manager_id', pm.response.json().id);}"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Warehouseman",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Admin {{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/users/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"email\": \"{{warehouse_email}}\",\n  \"password\": \"{{warehouse_password}}\",\n  \"passwordConfirm\": \"{{warehouse_password}}\",\n  \"role\": \"warehouseman\",\n  \"is_active\": true\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Warehouse created', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201,409]));",
+              "if(pm.response.code===200||pm.response.code===201){pm.collectionVariables.set('warehouse_id', pm.response.json().id);}"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Accountant",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Admin {{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/users/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"email\": \"{{accountant_email}}\",\n  \"password\": \"{{accountant_password}}\",\n  \"passwordConfirm\": \"{{accountant_password}}\",\n  \"role\": \"accountant\",\n  \"is_active\": true\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Accountant created', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201,409]));",
+              "if(pm.response.code===200||pm.response.code===201){pm.collectionVariables.set('accountant_id', pm.response.json().id);}"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Admin {{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/users/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"email\": \"{{owner_email}}\",\n  \"password\": \"{{owner_password}}\",\n  \"passwordConfirm\": \"{{owner_password}}\",\n  \"role\": \"owner\",\n  \"is_active\": true\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Owner created', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201,409]));",
+              "if(pm.response.code===200||pm.response.code===201){pm.collectionVariables.set('owner_id', pm.response.json().id);}"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "02 Users Auth (tokens)",
+      "item": [
+        {
+          "name": "Manager Login",
+          "request": {
+            "method": "POST",
+            "header": [ { "key":"Content-Type","value":"application/json" } ],
+            "url": "{{base_url}}/api/collections/users/auth-with-password",
+            "body": { "mode":"raw", "raw":
+"{\n  \"identity\": \"{{manager_email}}\",\n  \"password\": \"{{manager_password}}\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Manager auth OK', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "const r=pm.response.json(); pm.collectionVariables.set('manager_token', r.token); pm.collectionVariables.set('manager_id', r.record.id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Warehouse Login",
+          "request": {
+            "method": "POST",
+            "header": [ { "key":"Content-Type","value":"application/json" } ],
+            "url": "{{base_url}}/api/collections/users/auth-with-password",
+            "body": { "mode":"raw", "raw":
+"{\n  \"identity\": \"{{warehouse_email}}\",\n  \"password\": \"{{warehouse_password}}\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Warehouse auth OK', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "const r=pm.response.json(); pm.collectionVariables.set('warehouse_token', r.token); pm.collectionVariables.set('warehouse_id', r.record.id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Accountant Login",
+          "request": {
+            "method": "POST",
+            "header": [ { "key":"Content-Type","value":"application/json" } ],
+            "url": "{{base_url}}/api/collections/users/auth-with-password",
+            "body": { "mode":"raw", "raw":
+"{\n  \"identity\": \"{{accountant_email}}\",\n  \"password\": \"{{accountant_password}}\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Accountant auth OK', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "const r=pm.response.json(); pm.collectionVariables.set('accountant_token', r.token); pm.collectionVariables.set('accountant_id', r.record.id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Owner Login",
+          "request": {
+            "method": "POST",
+            "header": [ { "key":"Content-Type","value":"application/json" } ],
+            "url": "{{base_url}}/api/collections/users/auth-with-password",
+            "body": { "mode":"raw", "raw":
+"{\n  \"identity\": \"{{owner_email}}\",\n  \"password\": \"{{owner_password}}\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Owner auth OK', ()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "const r=pm.response.json(); pm.collectionVariables.set('owner_token', r.token); pm.collectionVariables.set('owner_id', r.record.id);"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "03 Catalog Setup (Admin)",
+      "item": [
+        {
+          "name": "Create Region",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/regions/records",
+            "body": { "mode":"raw", "raw": "{\n  \"name\": \"Toshkent\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Region created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('region_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/suppliers/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"name\": \"LesKom\",\n  \"tin\": \"7701234567\",\n  \"contact\": \"+998 90 000 00 00\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Supplier created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('supplier_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/categories/records",
+            "body": { "mode":"raw", "raw": "{\n  \"name\": \"Ichki eshiklar\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Category created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('category_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Dealer (link to Manager & Region)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/dealers/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"name\": \"Diller A\",\n  \"region\": \"{{region_id}}\",\n  \"assigned_manager\": \"{{manager_id}}\",\n  \"tin\": \"301234567\",\n  \"note\": \"Test dealer\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Dealer created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('dealer_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Product (auto Code128 barcode)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/products/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"name\": \"Eshik Premium-01\",\n  \"category\": \"{{category_id}}\",\n  \"size\": \"200x70\",\n  \"unit\": \"dona\",\n  \"price_usd\": 120,\n  \"is_active\": true\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Product created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "const r=pm.response.json(); pm.collectionVariables.set('product_id', r.id); pm.test('Barcode auto',()=>pm.expect(r.barcode).to.exist); pm.collectionVariables.set('product_barcode', r.barcode);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "FX Rate (USD→UZS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/fx_rates/records",
+            "body": { "mode":"raw", "raw": "{\n  \"date\": \"{{fx_date}}\",\n  \"usd_to_uzs\": 13000\n}" }
+          },
+          "event": [
+            { "listen":"prerequest","script":{"exec":[
+              "pm.collectionVariables.set('fx_date', new Date().toISOString().substring(0,10));"
+            ],"type":"text/javascript"} },
+            { "listen":"test","script":{"exec":[
+              "pm.test('FX saved',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('fx_rate_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "04 Dealer Opening Balance (adjustment)",
+      "item": [
+        {
+          "name": "Add dealer_balance_adjustment +300 USD",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Admin {{admin_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/dealer_balance_adjustments/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"dealer\": \"{{dealer_id}}\",\n  \"date\": \"{{fx_date}}\",\n  \"amount_usd\": 300,\n  \"note\": \"Opening balance\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Adjustment created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('dba_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "05 Stock Entry (purchase)",
+      "item": [
+        {
+          "name": "Create Stock Entry (USD, rate=1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{accountant_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/stock_entries/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"supplier\": \"{{supplier_id}}\",\n  \"date\": \"{{fx_date}}\",\n  \"currency\": \"USD\",\n  \"rate\": 1,\n  \"note\": \"Initial purchase\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Stock entry created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('stock_entry_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Add Stock Item (+10 @ $80)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{accountant_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/stock_entry_items/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"entry\": \"{{stock_entry_id}}\",\n  \"product\": \"{{product_id}}\",\n  \"qty\": 10,\n  \"price\": 80,\n  \"is_defect\": false\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Stock item OK',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('stock_item_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Verify Product Stock & AvgCost",
+          "request": {
+            "method": "GET",
+            "header": [ { "key":"Authorization","value":"Bearer {{accountant_token}}" } ],
+            "url": "{{base_url}}/api/collections/products/records/{{product_id}}"
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "const r=pm.response.json(); pm.test('stock_ok >= 10',()=>pm.expect(r.stock_ok).to.be.at.least(10)); pm.test('avg_cost_usd > 0',()=>pm.expect(r.avg_cost_usd).to.be.above(0));"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "06 Order Flow (Manager → Warehouse)",
+      "item": [
+        {
+          "name": "Create Order (status=created)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{manager_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/orders/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"dealer\": \"{{dealer_id}}\",\n  \"manager\": \"{{manager_id}}\",\n  \"region\": \"{{region_id}}\",\n  \"discount_type\": \"none\",\n  \"note\": \"Test order\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Order created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "const r=pm.response.json(); pm.collectionVariables.set('order_id', r.id); pm.collectionVariables.set('order_human', r.human_id||''); pm.test('ORD id',()=>pm.expect(r.human_id).to.match(/^ORD-/));"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Add Order Item (2 x $120)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{manager_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/order_items/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"order\": \"{{order_id}}\",\n  \"product\": \"{{product_id}}\",\n  \"qty\": 2,\n  \"unit_price_usd\": 120\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Order item added',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('order_item_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Manager → Request Edit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{manager_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/order_edit_requests/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"order\": \"{{order_id}}\",\n  \"requested_by\": \"{{manager_id}}\",\n  \"status\": \"requested\",\n  \"reason\": \"Tekshiruv\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Edit requested',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('edit_request_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Warehouse/Admin → Approve Edit",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{warehouse_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/order_edit_requests/records/{{edit_request_id}}",
+            "body": { "mode":"raw", "raw":
+"{\n  \"status\": \"approved\",\n  \"approved_by\": \"{{warehouse_id}}\",\n  \"approved_at\": \"{{now_iso}}\"\n}" }
+          },
+          "event": [
+            { "listen":"prerequest","script":{"exec":[
+              "pm.collectionVariables.set('now_iso', new Date().toISOString());"
+            ],"type":"text/javascript"} },
+            { "listen":"test","script":{"exec":[
+              "pm.test('Edit approved',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Verify Order editable",
+          "request": {
+            "method": "GET",
+            "header": [ { "key":"Authorization","value":"Bearer {{manager_token}}" } ],
+            "url": "{{base_url}}/api/collections/orders/records/{{order_id}}"
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "const r=pm.response.json(); pm.test('status=edit_requested',()=>r.status==='edit_requested'); pm.test('editable=true',()=>r.editable===true);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Warehouse → Set status=packed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{warehouse_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/orders/records/{{order_id}}",
+            "body": { "mode":"raw", "raw": "{\n  \"status\": \"packed\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Order packed',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Warehouse → Set status=shipped",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{warehouse_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/orders/records/{{order_id}}",
+            "body": { "mode":"raw", "raw": "{\n  \"status\": \"shipped\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Order shipped',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "07 Payments (Accountant)",
+      "item": [
+        {
+          "name": "Create Payment (UZS, fx auto, covers opening balance first)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{accountant_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/payments/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"dealer\": \"{{dealer_id}}\",\n  \"date\": \"{{fx_date}}\",\n  \"amount\": 500000,\n  \"currency\": \"UZS\",\n  \"method\": \"cash\",\n  \"note\": \"Prepay\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Payment created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('payment_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Verify payment_applications (opening → then FIFO orders)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key":"Authorization","value":"Bearer {{accountant_token}}" } ],
+            "url": {
+              "raw": "{{base_url}}/api/collections/payment_applications/records?filter=payment='{{payment_id}}'&perPage=50",
+              "host": [ "{{base_url}}" ],
+              "path": [ "api","collections","payment_applications","records" ],
+              "query": [
+                { "key":"filter","value":"payment='{{payment_id}}'"},
+                { "key":"perPage","value":"50"}
+              ]
+            }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "const r=pm.response.json(); pm.test('allocations exist',()=>r.totalItems>0);"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "08 Returns (Admin/Accountant)",
+      "item": [
+        {
+          "name": "Create Return Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{accountant_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/return_entries/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"dealer\": \"{{dealer_id}}\",\n  \"date\": \"{{fx_date}}\",\n  \"note\": \"Return from dealer\"\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Return entry created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('return_entry_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Create Return Item (+1 ok)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key":"Authorization","value":"Bearer {{accountant_token}}" },
+              { "key":"Content-Type","value":"application/json" }
+            ],
+            "url": "{{base_url}}/api/collections/return_entry_items/records",
+            "body": { "mode":"raw", "raw":
+"{\n  \"entry\": \"{{return_entry_id}}\",\n  \"product\": \"{{product_id}}\",\n  \"qty\": 1,\n  \"is_defect\": false\n}" }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Return item created',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));",
+              "pm.collectionVariables.set('return_item_id', pm.response.json().id);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Verify Product Stock increased (by return)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key":"Authorization","value":"Bearer {{accountant_token}}" } ],
+            "url": "{{base_url}}/api/collections/products/records/{{product_id}}"
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('stock_ok >= 1',()=>pm.expect(pm.response.json().stock_ok).to.be.at.least(1));"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "09 Logs & Audit (Owner/Admin view)",
+      "item": [
+        {
+          "name": "Stock Log (by product)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key":"Authorization","value":"Bearer {{owner_token}}" } ],
+            "url": {
+              "raw": "{{base_url}}/api/collections/stock_log/records?filter=product='{{product_id}}'&sort=-created&perPage=20",
+              "host": [ "{{base_url}}" ],
+              "path": [ "api","collections","stock_log","records" ],
+              "query": [
+                { "key":"filter", "value":"product='{{product_id}}'"},
+                { "key":"sort", "value":"-created"},
+                { "key":"perPage", "value":"20"}
+              ]
+            }
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Stock log exists',()=>pm.response.json().totalItems>0);"],
+              "type":"text/javascript"} }
+          ]
+        },
+        {
+          "name": "Activity Log (latest)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key":"Authorization","value":"Bearer {{owner_token}}" } ],
+            "url": "{{base_url}}/api/collections/activity_log/records?sort=-created&perPage=20"
+          },
+          "event": [
+            { "listen":"test","script":{"exec":[
+              "pm.test('Activity log visible',()=>pm.expect(pm.response.code).to.be.oneOf([200,201]));"],
+              "type":"text/javascript"} }
+          ]
+        }
+      ]
+    }
+  ]
+}

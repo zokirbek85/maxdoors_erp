@@ -1,0 +1,80 @@
+# =========================
+# OS / IDE / umumiy
+# =========================
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+*.orig
+*.bak
+.vscode/
+.idea/
+*.iml
+
+# Maxfiy ma'lumotlar (agar bo'lsa)
+.env
+*.env
+secrets.json
+*.key
+*.pem
+
+# =========================
+# Flutter / Dart (frontend)
+# =========================
+# Flutter build/kesh
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.melos_tool/
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Platform ephemeral (generatsiya qilinadigan)
+# iOS
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/.symlinks/
+
+# macOS
+macos/Flutter/GeneratedPluginRegistrant.swift
+macos/Flutter/ephemeral/
+
+# Android
+android/.gradle/
+android/local.properties
+**/GeneratedPluginRegistrant.java
+**/GeneratedPluginRegistrant.swift
+
+# Windows
+windows/flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# Web
+web/.dart_tool/
+web/build/
+
+# Agar siz lock faylini repo bilan barqaror versiyalar uchun saqlamoqchi bo'lsangiz,
+# pubspec.lock ni IGNORE QILMANG (hozircha saqlab qolamiz).
+# pubspec.lock
+
+# =========================
+# PocketBase (backend)
+# =========================
+# DIQQAT: HOZIR TEST UCHUN pb_data NI COMMIT QILAMIZ => IGNORE QILMAYMIZ
+# maxdoors_backend/pb_data/   <-- IGNORE QILINMAYDI
+
+# Kesh/lock/artefaktlar
+maxdoors_backend/pb_hooks_cache/
+maxdoors_backend/.pb_lock
+maxdoors_backend/build/
+maxdoors_backend/dist/
+
+# Migratsiyalar commit qilinadi (quyidagiga RUXSAT):
+!maxdoors_backend/pb_migrations/**
