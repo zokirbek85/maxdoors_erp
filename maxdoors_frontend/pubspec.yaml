@@ -10,8 +10,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  file_picker: ^8.0.3
+  file_picker: ^10.3.2
+  file_saver: ^0.3.1
   csv: ^6.0.0
+  excel: ^4.0.6
   path_provider: ^2.1.4
   # State management
   provider: ^6.1.2
@@ -24,7 +26,7 @@ dependencies:
 
   # Formatlar (sana/valyuta)
   intl: ^0.20.2
-
+  fl_chart: ^1.0.0
   # Barcode skaneri (kamera yoki hardware skaner bilan)
   flutter_barcode_scanner: ^2.0.0
 
@@ -39,11 +41,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-
+  flutter_launcher_icons: ^0.14.4
 flutter:
   uses-material-design: true
   assets:
     - assets/fonts/
+    - assets/images/logo.png
     
   # Agar PNG/SVG rasmlar bo'lsa:
   # assets:
@@ -58,3 +61,7 @@ flutter:
   #         weight: 500
   #       - asset: assets/fonts/Inter-Bold.ttf
   #         weight: 700
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/app_icon.png"

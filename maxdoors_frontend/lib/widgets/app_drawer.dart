@@ -8,8 +8,8 @@ import '../screens/login_screen.dart';
 import '../screens/orders/order_create_screen.dart';
 import '../screens/orders/orders_list_screen.dart';
 import '../screens/orders/approval_queue_screen.dart';
-import '../screens/orders/order_detail_screen.dart'; // agar boshqa joyda kerak bo‘lsa
-import '../screens/orders/order_item_add_screen.dart'; // agar boshqa joyda kerak bo‘lsa
+import '../screens/orders/order_detail_screen.dart';
+import '../screens/orders/order_item_add_screen.dart';
 
 // Stock / Products
 import '../screens/stock/stock_list_screen.dart';
@@ -18,7 +18,7 @@ import '../screens/stock/stock_entry_screen.dart';
 // Payments / Reports / Debts
 import '../screens/payments/payments_list_screen.dart';
 import '../screens/reports/reports_screen.dart';
-import '../screens/dealers/dealer_debt_screen.dart';
+import '../screens/dealers/dealer_debt_screen.dart'; // ← MUHIM: bevosita import
 
 // Regions & Dealers
 import '../screens/regions/regions_list_screen.dart';
@@ -68,7 +68,6 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // MUTABLE ro‘yxat — bu juda muhim!
     final List<Widget> items = [];
 
     if (role == "manager") {
@@ -101,7 +100,8 @@ class AppDrawer extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.account_balance_wallet),
           title: const Text("Mening dillerlarim qarzdorligi"),
-          onTap: () => _go(context, const DealerDebtScreen()),
+          onTap: () =>
+              _go(context, const DealerDebtScreen()), // ← to‘g‘ridan-to‘g‘ri
         ),
       ]);
     } else if (role == "warehouseman") {
@@ -182,32 +182,36 @@ class AppDrawer extends StatelessWidget {
           title: const Text("Mahsulotlar qoldig‘i"),
           onTap: () => _go(context, const StockListScreen()),
         ),
-        // Mahsulot importi
         ListTile(
           leading: const Icon(Icons.file_upload),
           title: const Text('Mahsulot importi'),
-          onTap: () => Navigator.of(context).pushNamed('/products/import'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.of(context).pushNamed('/products/import');
+          },
         ),
         ListTile(
           leading: const Icon(Icons.add_box),
           title: const Text("Kirim (Stock Entry)"),
           onTap: () => _go(context, const StockEntryScreen()),
         ),
-        // Qoldiq/Narx importi
         ListTile(
           leading: const Icon(Icons.playlist_add_check),
           title: const Text('Qoldiq/Narx importi'),
-          onTap: () =>
-              Navigator.of(context).pushNamed('/products/stock_import'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.of(context).pushNamed('/products/stock_import');
+          },
         ),
         const Divider(),
-        // Users CRUD (faqat admin)
         ListTile(
           leading: const Icon(Icons.group),
           title: const Text('Foydalanuvchilar (CRUD)'),
-          onTap: () => Navigator.of(context).pushNamed('/users'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.of(context).pushNamed('/users');
+          },
         ),
-        // Region/Dealer CRUD
         ListTile(
           leading: const Icon(Icons.map),
           title: const Text("Regionlar (CRUD)"),
@@ -221,7 +225,8 @@ class AppDrawer extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.account_balance_wallet),
           title: const Text("Dillerlar qarzdorligi"),
-          onTap: () => _go(context, const DealerDebtScreen()),
+          onTap: () =>
+              _go(context, const DealerDebtScreen()), // ← to‘g‘ridan-to‘g‘ri
         ),
         ListTile(
           leading: const Icon(Icons.bar_chart),
@@ -257,7 +262,7 @@ class AppDrawer extends StatelessWidget {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ),
-          ...items, // spread — bu yerda ro‘yxatni faqat ko‘rsatamiz
+          ...items,
         ],
       ),
     );

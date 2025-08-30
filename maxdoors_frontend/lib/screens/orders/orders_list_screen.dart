@@ -50,8 +50,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       }
       if (_query.isNotEmpty) {
         final safe = _query.replaceAll("'", r"\'");
-        // PBda expand orqali filterlash to‘g‘ridan bo‘lmaydi, shuning uchun
-        // number/daily_number/note kabi “text” maydonlarga tayanamiz
+        // expand.* bo‘yicha filter ishlamaydi → text maydonlar bilan qidiramiz
         filters.add("(number~'$safe' || daily_number~'$safe' || note~'$safe')");
       }
       if (filters.isNotEmpty) {
@@ -61,7 +60,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       final url = sb.toString();
       final res = await ApiService.get(url, token: token);
 
-      // 🔎 Konsolga “smoke test” chiqsin:
+      // smoke-log
       try {
         final li = (res['items'] as List?) ?? const [];
         final ti = (res['totalItems'] as num?)?.toInt() ?? li.length;
@@ -99,6 +98,8 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     super.dispose();
   }
 
+  // === UI helpers ===
+  /// Status ranglari
   Color _statusColor(BuildContext context, String? status) {
     final s = (status ?? '').toLowerCase();
     final scheme = Theme.of(context).colorScheme;
@@ -121,6 +122,43 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   Color _statusChipBg(BuildContext context, String? status) {
     final c = _statusColor(context, status);
     return c.withOpacity(0.12);
+  }
+
+  /// "XXX-dd.mm.yyyy" ko‘rinishida daily number chiqarish
+  String _displayDaily(Order o) {
+    // seq: daily_number ustuvor → keyin number oxiridagi raqam → aks holda null
+    String? raw = o.dailyNumber ?? o.number;
+    int? seq;
+
+    if (raw != null && RegExp(r'^\d+$').hasMatch(raw)) {
+      seq = int.tryParse(raw);
+    } else if (raw != null) {
+      final m = RegExp(r'(\d{1,4})$').firstMatch(raw);
+      if (m != null) seq = int.tryParse(m.group(1)!);
+    }
+
+    // sana: created dan
+    DateTime? dt;
+    try {
+      dt = DateTime.tryParse(o.created ?? '');
+    } catch (_) {}
+    String datePart = '';
+    if (dt != null) {
+      final dd = dt.day.toString().padLeft(2, '0');
+      final mm = dt.month.toString().padLeft(2, '0');
+      final yyyy = dt.year.toString().padLeft(4, '0');
+      datePart = '$dd.$mm.$yyyy';
+    }
+
+    if (seq != null && datePart.isNotEmpty) {
+      return '${seq.toString().padLeft(3, '0')}-$datePart';
+    }
+
+    // fallback
+    if (datePart.isNotEmpty && (o.number ?? '').isNotEmpty) {
+      return '${o.number}-$datePart';
+    }
+    return o.numberOrId; // eng oxiri id
   }
 
   Widget _legend(BuildContext context) {
@@ -206,7 +244,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Buyurtmalar'),
-        // Smoke-test diagnostika uchun pastki “subtitle”
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(22),
           child: Padding(
@@ -232,7 +269,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             child: Row(
               children: [
-                // Status filter
                 SizedBox(
                   width: 220,
                   child: DropdownButtonFormField<String>(
@@ -262,7 +298,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Search
                 Expanded(
                   child: TextField(
                     controller: _searchCtrl,
@@ -360,12 +395,11 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                                 ),
                               ],
                             ),
-                            // ⬇️ YANGI: IntrinsicHeight qo‘shildi
                             child: IntrinsicHeight(
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  // chapdagi rangli indikator
+                                  // chap indikator
                                   Container(
                                     width: 6,
                                     decoration: BoxDecoration(
@@ -383,12 +417,12 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          // yuqori qat: raqam + status chip + sana
+                                          // yuqori qat: daily number + status chip + sana
                                           Row(
                                             children: [
                                               Expanded(
                                                 child: Text(
-                                                  o.numberOrId,
+                                                  _displayDaily(o),
                                                   style: const TextStyle(
                                                     fontSize: 16,
                                                     fontWeight: FontWeight.w700,

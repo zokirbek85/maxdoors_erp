@@ -2,26 +2,27 @@ class Order {
   final String id;
 
   // raqamlar
-  final String? number; // masalan ORD-2025-08-01-001 yoki backendda number
-  final String? dailyNumber; // kunlik raqam (agar alohida maydon bo'lsa)
+  final String? number; // masalan ORD-2025-08-01-001
+  final String?
+      dailyNumber; // kunlik tartib raqami (ORD-YYYY-MM-DD-001 kabi bo‘lishi mumkin)
   final String?
       status; // created | edit_requested | editable | packed | shipped
   final String? note;
 
-  // vaqt tamg'asi (PocketBase record default)
+  // vaqt
   final String? created;
 
-  // relation ID'lar
+  // relation ID’lar
   final String? dealerId;
-  final String? managerId;
+  final String? managerId; // ← yaratuvchi user shu yerda
   final String? regionId;
   final String? warehouseId;
 
-  // discount
-  final String? discountType; // 'none' | 'percent' | 'amount'
-  final double? discountValue;
+  // chegirma
+  final String? discountType; // none | percent | amount
+  final double? discountValue; // USD
 
-  // expand (label ko'rsatish uchun)
+  // expand
   final Map<String, dynamic>? expand;
 
   Order({
@@ -41,47 +42,44 @@ class Order {
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
-    final exp = (json['expand'] is Map<String, dynamic>)
-        ? json['expand'] as Map<String, dynamic>
-        : null;
-
-    String? _safeString(dynamic v) => v == null ? null : v.toString();
-
-    double? _safeDouble(dynamic v) {
+    String? _s(dynamic v) => v == null ? null : v.toString();
+    double? _d(dynamic v) {
       if (v == null) return null;
       if (v is num) return v.toDouble();
       return double.tryParse(v.toString());
     }
 
+    final exp = (json['expand'] is Map<String, dynamic>)
+        ? json['expand'] as Map<String, dynamic>
+        : null;
+
     return Order(
       id: json['id'] as String,
-      number: _safeString(json['number']) ??
-          _safeString(json['human_id']) ??
-          _safeString(json['ord_number']),
-      dailyNumber: _safeString(json['daily_number']) ??
-          _safeString(json['human_id_daily']),
-      status: _safeString(json['status']),
-      note: _safeString(json['note']),
-      created: _safeString(json['created']),
-      dealerId: _safeString(json['dealer']),
-      managerId: _safeString(json['manager']),
-      regionId: _safeString(json['region']),
-      warehouseId: _safeString(json['warehouse']),
-      discountType: _safeString(json['discount_type']) ??
-          _safeString(json['discountType']) ??
-          'none',
-      discountValue:
-          _safeDouble(json['discount_value'] ?? json['discountValue']),
+      number:
+          _s(json['number']) ?? _s(json['human_id']) ?? _s(json['ord_number']),
+      dailyNumber: _s(json['daily_number']) ?? _s(json['human_id_daily']),
+      status: _s(json['status']),
+      note: _s(json['note']),
+      created: _s(json['created']),
+      dealerId: _s(json['dealer']),
+      managerId: _s(json['manager']), // yaratuvchi shu
+      regionId: _s(json['region']),
+      warehouseId: _s(json['warehouse']),
+      discountType:
+          _s(json['discount_type']) ?? _s(json['discountType']) ?? 'none',
+      discountValue: _d(json['discount_value'] ?? json['discountValue']),
       expand: exp,
     );
   }
 
+  /// Ro‘yxatda ko‘rinadigan raqam
   String get numberOrId {
     if ((dailyNumber ?? '').isNotEmpty) return dailyNumber!;
     if ((number ?? '').isNotEmpty) return number!;
     return '#$id';
   }
 
+  // expand label helpers
   String? get expandDealerName => expand?['dealer']?['name']?.toString();
   String? get expandManagerName => expand?['manager']?['name']?.toString();
   String? get expandRegionName => expand?['region']?['name']?.toString();
@@ -91,6 +89,24 @@ class Order {
   String get managerLabel => expandManagerName ?? managerId ?? '-';
   String get regionLabel => expandRegionName ?? regionId ?? '-';
   String get warehouseLabel => expandWarehouseName ?? warehouseId ?? '-';
+
+  /// Statusni o‘zbekcha ko‘rinishi
+  String get statusUz {
+    switch ((status ?? '').toLowerCase()) {
+      case 'created':
+        return 'Yaratildi';
+      case 'edit_requested':
+        return 'Tahrir so‘rovi';
+      case 'editable':
+        return 'Tahrirlash mumkin';
+      case 'packed':
+        return 'Yig‘ildi';
+      case 'shipped':
+        return 'Jo‘natildi';
+      default:
+        return status ?? '-';
+    }
+  }
 }
 
 class OrderItem {
@@ -111,7 +127,7 @@ class OrderItem {
   });
 
   factory OrderItem.fromJson(Map<String, dynamic> json) {
-    double? _safeDouble(dynamic v) {
+    double? _d(dynamic v) {
       if (v == null) return null;
       if (v is num) return v.toDouble();
       return double.tryParse(v.toString());
@@ -125,8 +141,8 @@ class OrderItem {
       id: json['id'] as String,
       orderId: json['order']?.toString() ?? '',
       productId: json['product']?.toString() ?? '',
-      qty: _safeDouble(json['qty']),
-      unitPriceUsd: _safeDouble(
+      qty: _d(json['qty']),
+      unitPriceUsd: _d(
           json['unit_price_usd'] ?? json['unitPriceUsd'] ?? json['price_usd']),
       expand: exp,
     );

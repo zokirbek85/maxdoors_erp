@@ -43,39 +43,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   double get _totalUsd =>
       (_subtotalUsd - _discountUsd).clamp(0, double.infinity);
 
-  bool get _isManager {
-    final r = context.read<AuthProvider>().role ?? '';
-    return r == 'manager';
-  }
-
-  bool get _isWarehouse {
-    final r = context.read<AuthProvider>().role ?? '';
-    return r == 'warehouseman';
-  }
-
+  // ---- roles ----
+  bool get _isManager => (context.read<AuthProvider>().role ?? '') == 'manager';
+  bool get _isWarehouse =>
+      (context.read<AuthProvider>().role ?? '') == 'warehouseman';
   bool get _isAdminOrAcc {
     final r = context.read<AuthProvider>().role ?? '';
     return r == 'admin' || r == 'accountant';
   }
 
+  /// Manager (yoki admin/accountant) CREATED yoki EDITABLE holatda item qo‘sha oladi
   bool get _canEditItems {
     if (_order == null) return false;
     final st = _order!.status ?? '';
     final canRole = _isManager || _isAdminOrAcc;
-    return canRole && st == 'editable';
+    return canRole && (st == 'created' || st == 'editable');
   }
 
+  /// Edit so‘rash faqat PACKED dan keyin (manager)
   bool get _canRequestEdit {
     if (_order == null) return false;
     final st = _order!.status ?? '';
-    // Manager created/packed/shipped holatlarda tahrir so'rashi mumkin
-    return _isManager && (st == 'created' || st == 'packed' || st == 'shipped');
+    return _isManager && st == 'packed';
   }
 
+  /// EDITABLE → CREATED (manager/admin/accountant)
   bool get _canResendToWarehouse {
     if (_order == null) return false;
     final st = _order!.status ?? '';
-    // Manager yoki Admin/Accountant editable holatda created'ga qayta jo'natadi
     return (_isManager || _isAdminOrAcc) && st == 'editable';
   }
 
@@ -130,12 +125,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Future<void> _requestEdit() async {
-    // manager → edit_requested
     await _setStatus('edit_requested');
   }
 
   Future<void> _resendToWarehouse() async {
-    // editable → created
     await _setStatus('created');
   }
 
@@ -182,18 +175,60 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// "XXX-dd.mm.yyyy" ko‘rinishida ko‘rsatish
+  String _displayDaily(Order o) {
+    String? raw = o.dailyNumber ?? o.number;
+    int? seq;
+    if (raw != null && RegExp(r'^\d+$').hasMatch(raw)) {
+      seq = int.tryParse(raw);
+    } else if (raw != null) {
+      final m = RegExp(r'(\d{1,4})$').firstMatch(raw);
+      if (m != null) seq = int.tryParse(m.group(1)!);
+    }
+    DateTime? dt;
+    try {
+      dt = DateTime.tryParse(o.created ?? '');
+    } catch (_) {}
+    String datePart = '';
+    if (dt != null) {
+      final dd = dt.day.toString().padLeft(2, '0');
+      final mm = dt.month.toString().padLeft(2, '0');
+      final yyyy = dt.year.toString().padLeft(4, '0');
+      datePart = '$dd.$mm.$yyyy';
+    }
+    if (seq != null && datePart.isNotEmpty) {
+      return '${seq.toString().padLeft(3, '0')}-$datePart';
+    }
+    if (datePart.isNotEmpty && (o.number ?? '').isNotEmpty) {
+      return '${o.number}-$datePart';
+    }
+    return o.numberOrId;
+  }
+
   @override
   void initState() {
     super.initState();
     _fetch();
   }
 
+  Future<void> _openAddItem() async {
+    final added = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+          builder: (_) => OrderItemAddScreen(orderId: widget.orderId)),
+    );
+    if (added == true && mounted) _fetch();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final role = context.read<AuthProvider>().role ?? '';
+    final dailyTitle =
+        (!_loading && _order != null) ? _displayDaily(_order!) : null;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Buyurtma detali'),
+        // Sarlavha: kunlik raqam + sana
+        title: Text(dailyTitle ?? 'Buyurtma detali'),
         actions: [
           if (!_loading && _order != null && _isWarehouse)
             IconButton(
@@ -201,21 +236,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               icon: const Icon(Icons.print),
               onPressed: _printPackingSlip,
             ),
+          if (_canEditItems)
+            IconButton(
+              tooltip: 'Mahsulot qo‘shish',
+              icon: const Icon(Icons.add),
+              onPressed: _openAddItem,
+            ),
         ],
       ),
       floatingActionButton: _canEditItems
           ? FloatingActionButton.extended(
-              onPressed: () async {
-                final added = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) =>
-                          OrderItemAddScreen(orderId: widget.orderId)),
-                );
-                if (added == true) {
-                  if (mounted) _fetch();
-                }
-              },
+              onPressed: _openAddItem,
               icon: const Icon(Icons.add),
               label: const Text('Mahsulot qo‘shish'),
             )
@@ -231,15 +262,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       child: ListView(
                         padding: const EdgeInsets.all(16),
                         children: [
-                          // Sarlavha va status
+                          // Header (status va meta)
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                _order!.numberOrId,
-                                style: const TextStyle(
-                                    fontSize: 18, fontWeight: FontWeight.bold),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Dealer: ${_order!.dealerLabel} • Region: ${_order!.regionLabel}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      'Manager: ${_order!.managerLabel} • Warehouse: ${_order!.warehouseLabel}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (_order!.note?.isNotEmpty == true)
+                                      Text('Izoh: ${_order!.note}'),
+                                  ],
+                                ),
                               ),
+                              const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 4),
@@ -253,16 +297,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                              'Dealer: ${_order!.dealerLabel} • Region: ${_order!.regionLabel}'),
-                          Text(
-                              'Manager: ${_order!.managerLabel} • Warehouse: ${_order!.warehouseLabel}'),
-                          if (_order!.note?.isNotEmpty == true)
-                            Text('Izoh: ${_order!.note}'),
+
                           const SizedBox(height: 12),
 
-                          // MANAGER ACTIONS
+                          // Actions
                           if (_canRequestEdit)
                             Row(
                               children: [
@@ -286,13 +324,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
                           const SizedBox(height: 8),
                           const Divider(),
-
                           const Text('Tovarlar',
                               style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
 
                           if (_items.isEmpty)
-                            const Text('Hozircha mahsulot qo‘shilmagan.')
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Hozircha mahsulot qo‘shilmagan.'),
+                                if (_canEditItems) ...[
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: _openAddItem,
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Mahsulot qo‘shish'),
+                                  ),
+                                ],
+                              ],
+                            )
                           else
                             ..._items.map((it) {
                               final name = it.expandProductName ?? it.productId;
@@ -314,7 +364,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     'Qty: $qty  •  \$${price.toStringAsFixed(2)}'),
                                 trailing: trailingDelete,
                               );
-                            }).toList(),
+                            }),
 
                           const Divider(),
                           const SizedBox(height: 8),
@@ -352,15 +402,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                           const SizedBox(height: 20),
 
-                          // WAREHOUSE ACTIONS
                           if (_isWarehouse) ...[
                             ElevatedButton(
-                                onPressed: () => _setStatus('packed'),
-                                child: const Text('Packed')),
+                              onPressed: () => _setStatus('packed'),
+                              child: const Text('Packed'),
+                            ),
                             const SizedBox(height: 8),
                             ElevatedButton(
-                                onPressed: () => _setStatus('shipped'),
-                                child: const Text('Shipped')),
+                              onPressed: () => _setStatus('shipped'),
+                              child: const Text('Shipped'),
+                            ),
                             const SizedBox(height: 8),
                             ElevatedButton.icon(
                               onPressed: _printPackingSlip,
