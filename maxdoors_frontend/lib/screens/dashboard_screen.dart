@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/app_drawer.dart';
+import 'orders/orders_list_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -10,11 +11,17 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final role = authProvider.role ?? "unknown";
+    final auth = Provider.of<AuthProvider>(context);
+    final userName = auth.name?.isNotEmpty == true
+        ? auth.name
+        : auth.email?.isNotEmpty == true
+            ? auth.email
+            : "Foydalanuvchi";
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("MaxDoors ERP"),
-        backgroundColor: const Color.fromARGB(255, 165, 133, 19),
+        backgroundColor: const Color.fromARGB(255, 197, 156, 7),
         elevation: 0,
       ),
       drawer: AppDrawer(role: role),
@@ -43,14 +50,15 @@ class DashboardScreen extends StatelessWidget {
                 const SizedBox(height: 32),
                 // Xush kelibsiz xabari
                 Text(
-                  "Xush kelibsiz! Rolingiz: ${role.toUpperCase()}",
+                  "Xush kelibsiz, $userName!",
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: const Color.fromRGBO(27, 20, 100, 1),
+                    color: Color.fromRGBO(27, 20, 100, 1),
                   ),
                 ),
+
                 const SizedBox(height: 16),
                 // Qisqacha tavsif
                 const Text(
@@ -65,7 +73,12 @@ class DashboardScreen extends StatelessWidget {
                 // Kirish tugmasi
                 ElevatedButton(
                   onPressed: () {
-                    // Dashboardga o'tish yoki boshqa kerakli harakat
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const OrdersListScreen(),
+                      ),
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
@@ -73,7 +86,7 @@ class DashboardScreen extends StatelessWidget {
                     backgroundColor: const Color.fromRGBO(27, 20, 100, 1),
                   ),
                   child: const Text(
-                    "Dashboardga o'tish",
+                    "Buyurtmalar sahifasiga o'tish",
                     style: TextStyle(fontSize: 18, color: Colors.white),
                   ),
                 ),

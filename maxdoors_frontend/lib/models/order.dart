@@ -107,6 +107,10 @@ class Order {
         return status ?? '-';
     }
   }
+
+  get humanId => null;
+
+  get dailySeq => null;
 }
 
 class OrderItem {

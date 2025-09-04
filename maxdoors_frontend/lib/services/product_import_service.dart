@@ -2,39 +2,47 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:csv/csv.dart';
+import 'package:excel/excel.dart' as xlsx;
 import 'package:path_provider/path_provider.dart';
 
 import '../services/api_service.dart';
 
-/// === Maydon nomlari xaritasi (moslashtiriladigan) ===========================
-/// Agar PocketBase'da maydon nomlari boshqacha bo'lsa, faqat shu joyni tahrir qiling.
+/// === Maydon nomlari xaritasi (PB sxemaga mos) ===============================
+/// Sxema: products: supplier(rel, opt), category(rel, req), name(req), barcode(unique),
+/// type(select: pg/po), size, color, price_usd(req), cost_price_usd, is_active(req),
+/// stock_ok, stock_defect, avg_cost_usd, ...
 class ProductFields {
   // Products collection field names
-  static const String name = 'name';
-  static const String category = 'category'; // rel
-  static const String size = 'size';
-  static const String priceUsd = 'price_usd'; // double
-  static const String unit = 'unit';
-  static const String imageUrl = 'image_url'; // yoki `image`
   static const String supplier = 'supplier'; // rel
-  static const String barcode = 'barcode'; // ixtiyoriy
-  static const String isActive = 'is_active'; // bool, ko'pincha required
+  static const String category = 'category'; // rel (required)
+  static const String name = 'name'; // required
+  static const String barcode = 'barcode'; // unique (ixtiyoriy)
+  static const String type = 'type'; // select (pg/po)
+  static const String size = 'size';
+  static const String color = 'color';
+  static const String priceUsd =
+      'price_usd'; // required (sale_price_usd kiradi)
+  static const String costPriceUsd = 'cost_price_usd';
+  static const String avgCostUsd =
+      'avg_cost_usd'; // bu yerga amount_usd yozamiz (agar kerak bo‘lsa)
+  static const String stockOk = 'stock_ok';
+  static const String stockDefect = 'stock_defect';
+  static const String isActive = 'is_active'; // required
 
   // Reference collections (fallback bilan)
   static const List<String> categoryCollections = [
-    'product_categories',
-    'categories'
+    'categories',
+    'product_categories'
   ];
-  static const List<String> supplierCollections = [
-    'suppliers'
-  ]; // kerak bo'lsa alternativa qo'shing
+  static const List<String> supplierCollections = ['suppliers'];
 
   // Reference name field
   static const String refNameField = 'name';
 }
 
-/// === CSV Format =============================================================
-/// name, category_name, size, price_usd, unit, image_url, supplier_name, barcode
+/// === CSV/XLSX ustunlari =====================================================
+/// supplier, category, name, barcode, type, size, color,
+/// qty_ok, qty_defect, cost_price_usd, sale_price_usd, amount_usd, is_active
 class ProductImportService {
   final String token;
 
@@ -43,36 +51,68 @@ class ProductImportService {
 
   ProductImportService({required this.token, this.createMissingRefs = false});
 
-  /// CSV shablonini foydalanuvchi papkasiga yozadi
+  /// CSV shablonini foydalanuvchi papkasiga yozadi (yangi format)
   static Future<File> writeTemplate() async {
     final headers = [
+      'supplier',
+      'category',
       'name',
-      'category_name',
+      'barcode',
+      'type',
       'size',
-      'price_usd',
-      'unit',
-      'image_url',
-      'supplier_name',
-      'barcode'
+      'color',
+      'qty_ok',
+      'qty_defect',
+      'cost_price_usd',
+      'sale_price_usd',
+      'amount_usd',
+      'is_active',
     ];
     final example = [
       [
-        'Eshik Premium-01',
-        'Ichki eshiklar',
-        '80x200',
-        '120',
-        'dona',
-        'https://.../img1.jpg',
         'LesKom',
-        ''
+        'Ichki eshiklar',
+        'Eshik Premium-01',
+        'MD-1234567890',
+        'pg',
+        '80x200',
+        'white',
+        '10',
+        '0',
+        '80',
+        '120',
+        '85',
+        '1'
       ],
-      ['Standart', 'Ichki eshiklar', '80x200', '150', 'dona', '', 'LesKom', ''],
+      [
+        'LesKom',
+        'Ichki eshiklar',
+        'Standart',
+        '',
+        'po',
+        '80x200',
+        'oak',
+        '3',
+        '1',
+        '60',
+        '95',
+        '70',
+        '1'
+      ],
     ];
     final dir = await getDownloadsDirectory() ??
         await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/products_template.csv');
-    final csv = const ListToCsvConverter().convert([headers, ...example]);
-    await file.writeAsString(csv, encoding: const Utf8Codec());
+    final file = File('${dir.path}/products_template.xlsx');
+
+    final excel = xlsx.Excel.createExcel();
+    final sheet = excel['Template'];
+    sheet.appendRow(headers.map((e) => xlsx.TextCellValue(e)).toList());
+    for (final row in example) {
+      sheet
+          .appendRow(row.map((e) => xlsx.TextCellValue(e.toString())).toList());
+    }
+    final bytes = excel.encode()!;
+    await file.writeAsBytes(bytes);
     return file;
   }
 
@@ -142,9 +182,21 @@ class ProductImportService {
     return id;
   }
 
-  // -------------------- CSV parsing ----------------------------------------
+  // -------------------- CSV/XLSX parsing ------------------------------------
 
-  Future<_ParsedCsv> parseCsv({List<int>? bytes, File? file}) async {
+  Future<_ParsedProductsSheet> parseCsvOrXlsx(
+      {File? file, List<int>? bytes}) async {
+    if (bytes != null ||
+        (file != null && file.path.toLowerCase().endsWith('.csv'))) {
+      return _parseCsv(bytes: bytes, file: file);
+    } else if (file != null && file.path.toLowerCase().endsWith('.xlsx')) {
+      return _parseXlsx(file: file);
+    } else {
+      throw StateError('Fayl .csv yoki .xlsx bo‘lishi kerak');
+    }
+  }
+
+  Future<_ParsedProductsSheet> _parseCsv({List<int>? bytes, File? file}) async {
     final content = bytes != null
         ? utf8.decode(bytes)
         : await file!.readAsString(encoding: const Utf8Codec());
@@ -153,148 +205,295 @@ class ProductImportService {
     if (rows.isEmpty) throw StateError('CSV bo‘sh');
     final header = rows.first.map((e) => e.toString().trim()).toList();
 
-    const requiredCols = [
+    final required = [
+      'supplier',
+      'category',
       'name',
-      'category_name',
-      'price_usd',
-      'unit',
-      'supplier_name'
+      'sale_price_usd',
+      'is_active',
     ];
-    for (final col in requiredCols) {
+    for (final col in required) {
       if (!header.contains(col)) {
         throw StateError("CSV sarlavhasida '$col' ustuni yo‘q");
       }
     }
 
     int idx(String col) => header.indexOf(col);
+    String get(List row, String col) {
+      final j = idx(col);
+      if (j < 0 || j >= row.length) return '';
+      return (row[j] ?? '').toString().trim();
+    }
 
-    final List<_ProductRow> items = [];
+    final items = <_ImportRow>[];
     for (var i = 1; i < rows.length; i++) {
       final r = rows[i];
-      if (r.isEmpty || r.every((e) => (e?.toString().trim() ?? '').isEmpty))
+      if (r.isEmpty || r.every((e) => (e?.toString().trim() ?? '').isEmpty)) {
         continue;
-
-      String _get(String col) {
-        final j = idx(col);
-        if (j < 0 || j >= r.length) return '';
-        return (r[j] ?? '').toString().trim();
       }
-
-      items.add(_ProductRow(
+      items.add(_ImportRow(
         line: i + 1,
-        name: _get('name'),
-        categoryName: _get('category_name'),
-        size: _get('size'),
-        priceUsd: _get('price_usd'),
-        unit: _get('unit'),
-        imageUrl: _get('image_url'),
-        supplierName: _get('supplier_name'),
-        barcode: _get('barcode'),
+        supplier: get(r, 'supplier'),
+        category: get(r, 'category'),
+        name: get(r, 'name'),
+        barcode: get(r, 'barcode'),
+        type: get(r, 'type'),
+        size: get(r, 'size'),
+        color: get(r, 'color'),
+        qtyOk: get(r, 'qty_ok'),
+        qtyDefect: get(r, 'qty_defect'),
+        costPriceUsd: get(r, 'cost_price_usd'),
+        salePriceUsd: get(r, 'sale_price_usd'),
+        amountUsd: get(r, 'amount_usd'),
+        isActive: get(r, 'is_active'),
       ));
     }
-    return _ParsedCsv(header: header, rows: items);
+    return _ParsedProductsSheet(rows: items);
   }
 
-  // -------------------- Import main ----------------------------------------
+  Future<_ParsedProductsSheet> _parseXlsx({required File file}) async {
+    final bytes = await file.readAsBytes();
+    final excel = xlsx.Excel.decodeBytes(bytes);
+    final table =
+        excel.tables.values.isNotEmpty ? excel.tables.values.first : null;
+    if (table == null || table.rows.isEmpty) {
+      throw StateError('Excel bo‘sh');
+    }
 
-  Future<ImportResult> importProducts(_ParsedCsv parsed) async {
+    final header = table.rows.first
+        .map((c) => (c?.value?.toString() ?? '').trim())
+        .toList();
+
+    final required = [
+      'supplier',
+      'category',
+      'name',
+      'sale_price_usd',
+      'is_active',
+    ];
+    for (final col in required) {
+      if (!header.contains(col)) {
+        throw StateError("Excel sarlavhasida '$col' ustuni yo‘q");
+      }
+    }
+
+    int idx(String col) => header.indexOf(col);
+    String get(List<xlsx.Data?> row, String col) {
+      final j = idx(col);
+      if (j < 0 || j >= row.length) return '';
+      final v = row[j]?.value;
+      return (v ?? '').toString().trim();
+    }
+
+    final items = <_ImportRow>[];
+    for (var i = 1; i < table.rows.length; i++) {
+      final r = table.rows[i];
+      if (r.isEmpty ||
+          r.every((c) => ((c?.value?.toString() ?? '').trim()).isEmpty)) {
+        continue;
+      }
+      items.add(_ImportRow(
+        line: i + 1,
+        supplier: get(r, 'supplier'),
+        category: get(r, 'category'),
+        name: get(r, 'name'),
+        barcode: get(r, 'barcode'),
+        type: get(r, 'type'),
+        size: get(r, 'size'),
+        color: get(r, 'color'),
+        qtyOk: get(r, 'qty_ok'),
+        qtyDefect: get(r, 'qty_defect'),
+        costPriceUsd: get(r, 'cost_price_usd'),
+        salePriceUsd: get(r, 'sale_price_usd'),
+        amountUsd: get(r, 'amount_usd'),
+        isActive: get(r, 'is_active'),
+      ));
+    }
+    return _ParsedProductsSheet(rows: items);
+  }
+
+  // -------------------- Upsert helpers --------------------------------------
+
+  Future<Map<String, dynamic>?> _findProductByBarcode(String barcode) async {
+    if (barcode.isEmpty) return null;
+    final filter = "barcode='$barcode'";
+    final res = await ApiService.get(
+      'collections/products/records?perPage=1&page=1&filter=${Uri.encodeComponent(filter)}',
+      token: token,
+    );
+    final items =
+        List<Map<String, dynamic>>.from((res['items'] as List?) ?? []);
+    if (items.isEmpty) return null;
+    return items.first;
+  }
+
+  Future<Map<String, dynamic>?> _findProductByName(String name) async {
+    if (name.isEmpty) return null;
+    final safe = name.replaceAll("'", r"\'");
+    final filter = "name='$safe'";
+    final res = await ApiService.get(
+      'collections/products/records?perPage=1&page=1&filter=${Uri.encodeComponent(filter)}',
+      token: token,
+    );
+    final items =
+        List<Map<String, dynamic>>.from((res['items'] as List?) ?? []);
+    if (items.isEmpty) return null;
+    return items.first;
+  }
+
+  double? _toDouble(String s) {
+    if (s.isEmpty) return null;
+    return double.tryParse(s.replaceAll(',', '.'));
+  }
+
+  bool _toBool(String s) {
+    final t = s.trim().toLowerCase();
+    return t == '1' || t == 'true' || t == 'ha' || t == 'yes';
+  }
+
+  // -------------------- Import (upsert) -------------------------------------
+
+  Future<ImportResult> importProducts(_ParsedProductsSheet parsed) async {
     final errors = <String>[];
     final createdIds = <String>[];
+    int updated = 0;
 
-    // Fallback bilan nom->id keshlarini tayyorlaymiz
+    // nom→id kesh
     final catMap = await _buildNameToIdAny(ProductFields.categoryCollections);
     final supMap = await _buildNameToIdAny(ProductFields.supplierCollections);
 
-    // Yaratish uchun qaysi kolleksiyani ishlatamiz (category uchun)
+    // qaysi kolleksiyada kategoriya yaratamiz (prefer)
     final categoryCollectionPrefer = ProductFields.categoryCollections.first;
+    final supplierCollectionPrefer = ProductFields.supplierCollections.first;
 
     for (final row in parsed.rows) {
       try {
-        // --- Tekshiruvlar
+        // majburiy tekshiruvlar
         if (row.name.isEmpty) throw StateError('name bo‘sh');
-        if (row.categoryName.isEmpty) throw StateError('category_name bo‘sh');
-        if (row.supplierName.isEmpty) throw StateError('supplier_name bo‘sh');
-        final price = double.tryParse(row.priceUsd.replaceAll(',', '.'));
-        if (price == null)
-          throw StateError('price_usd noto‘g‘ri: ${row.priceUsd}');
-        if (row.unit.isEmpty) throw StateError('unit bo‘sh');
+        if (row.category.isEmpty) throw StateError('category bo‘sh');
+        if (row.supplier.isEmpty) throw StateError('supplier bo‘sh');
+        final price = _toDouble(row.salePriceUsd);
+        if (price == null) {
+          throw StateError("sale_price_usd noto‘g‘ri: ${row.salePriceUsd}");
+        }
+        final isActive = _toBool(row.isActive);
 
-        // --- IDlarni yechish
-        // Kategoriya: mavjud keshda bo‘lmasa, prefer qilingan kolleksiyada yaratamiz
+        // ref id'lar
         final categoryId = await _ensureRefId(
-          collection: catMap.isNotEmpty
-              ? categoryCollectionPrefer
-              : ProductFields.categoryCollections.last,
-          name: row.categoryName,
+          collection: categoryCollectionPrefer,
+          name: row.category,
           cache: catMap,
         );
         final supplierId = await _ensureRefId(
-          collection: ProductFields.supplierCollections.first,
-          name: row.supplierName,
+          collection: supplierCollectionPrefer,
+          name: row.supplier,
           cache: supMap,
         );
 
-        // --- Product body
+        // upsert target
+        Map<String, dynamic>? existing;
+        if (row.barcode.isNotEmpty) {
+          existing = await _findProductByBarcode(row.barcode);
+        }
+        existing ??= await _findProductByName(row.name);
+
         final body = <String, dynamic>{
           ProductFields.name: row.name,
           ProductFields.category: categoryId,
-          ProductFields.size: row.size.isEmpty ? null : row.size,
-          ProductFields.priceUsd: price,
-          ProductFields.unit: row.unit,
           ProductFields.supplier: supplierId,
-          // 🔴 MUHIM: majburiy bo‘lsa validationdan o‘tishi uchun default `true`
-          ProductFields.isActive: true,
+          ProductFields.priceUsd: price, // sale_price_usd
+          ProductFields.isActive: isActive,
         };
-        if (row.barcode.isNotEmpty) body[ProductFields.barcode] = row.barcode;
-        if (row.imageUrl.isNotEmpty)
-          body[ProductFields.imageUrl] = row.imageUrl;
 
-        final res = await ApiService.post('collections/products/records', body,
-            token: token);
-        createdIds.add(res['id'] as String);
+        // optionallar
+        if (row.barcode.isNotEmpty) body[ProductFields.barcode] = row.barcode;
+        if (row.type.isNotEmpty) body[ProductFields.type] = row.type;
+        if (row.size.isNotEmpty) body[ProductFields.size] = row.size;
+        if (row.color.isNotEmpty) body[ProductFields.color] = row.color;
+
+        final cost = _toDouble(row.costPriceUsd);
+        if (cost != null) body[ProductFields.costPriceUsd] = cost;
+
+        final qtyOk = _toDouble(row.qtyOk);
+        if (qtyOk != null) body[ProductFields.stockOk] = qtyOk;
+
+        final qtyDef = _toDouble(row.qtyDefect);
+        if (qtyDef != null) body[ProductFields.stockDefect] = qtyDef;
+
+        // amount_usd → avg_cost_usd (agar util. ma'noda o‘rtacha qiymat bo‘lsa)
+        final amt = _toDouble(row.amountUsd);
+        if (amt != null) body[ProductFields.avgCostUsd] = amt;
+
+        if (existing == null) {
+          // CREATE
+          final res = await ApiService.post(
+              'collections/products/records', body,
+              token: token);
+          createdIds.add(res['id'] as String);
+        } else {
+          // PATCH
+          final id = (existing['id'] as String);
+          await ApiService.patch('collections/products/records/$id', body,
+              token: token);
+          updated++;
+        }
       } catch (e) {
         errors.add('Line ${row.line}: $e');
       }
     }
 
-    return ImportResult(createdIds: createdIds, errors: errors);
+    return ImportResult(
+        createdIds: createdIds, updatedCount: updated, errors: errors);
   }
 }
 
 // ============================ Internal models ===============================
 
-class _ParsedCsv {
-  final List<String> header;
-  final List<_ProductRow> rows;
-  _ParsedCsv({required this.header, required this.rows});
+class _ParsedProductsSheet {
+  final List<_ImportRow> rows;
+  _ParsedProductsSheet({required this.rows});
 }
 
-class _ProductRow {
+class _ImportRow {
   final int line;
+  final String supplier;
+  final String category;
   final String name;
-  final String categoryName;
-  final String size;
-  final String priceUsd;
-  final String unit;
-  final String imageUrl;
-  final String supplierName;
   final String barcode;
-  _ProductRow({
+  final String type;
+  final String size;
+  final String color;
+  final String qtyOk;
+  final String qtyDefect;
+  final String costPriceUsd;
+  final String salePriceUsd;
+  final String amountUsd;
+  final String isActive;
+  _ImportRow({
     required this.line,
+    required this.supplier,
+    required this.category,
     required this.name,
-    required this.categoryName,
-    required this.size,
-    required this.priceUsd,
-    required this.unit,
-    required this.imageUrl,
-    required this.supplierName,
     required this.barcode,
+    required this.type,
+    required this.size,
+    required this.color,
+    required this.qtyOk,
+    required this.qtyDefect,
+    required this.costPriceUsd,
+    required this.salePriceUsd,
+    required this.amountUsd,
+    required this.isActive,
   });
 }
 
 class ImportResult {
   final List<String> createdIds;
+  final int updatedCount;
   final List<String> errors;
   bool get hasErrors => errors.isNotEmpty;
-  ImportResult({required this.createdIds, required this.errors});
+  ImportResult(
+      {required this.createdIds,
+      required this.updatedCount,
+      required this.errors});
 }

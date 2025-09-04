@@ -20,11 +20,12 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
   bool _busy = false;
   List<String> _errors = [];
   int _created = 0;
+  int _updated = 0;
 
-  Future<void> _pickCsv() async {
+  Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['csv'],
+      allowedExtensions: ['csv', 'xlsx'],
       withData: false,
     );
     if (result != null && result.files.single.path != null) {
@@ -34,6 +35,7 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
             'Fayl tanlandi: ${_file!.path.split(Platform.pathSeparator).last}';
         _errors = [];
         _created = 0;
+        _updated = 0;
       });
     }
   }
@@ -59,7 +61,7 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
   Future<void> _dryRun() async {
     if (_file == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avval CSV fayl tanlang')));
+          const SnackBar(content: Text('Avval CSV yoki XLSX fayl tanlang')));
       return;
     }
     final token = context.read<AuthProvider>().token!;
@@ -70,10 +72,11 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
       _busy = true;
       _errors = [];
       _created = 0;
+      _updated = 0;
       _status = 'Tekshirilmoqda...';
     });
     try {
-      final parsed = await service.parseCsv(file: _file);
+      final parsed = await service.parseCsvOrXlsx(file: _file);
       setState(() {
         _status = 'Dry-run OK. ${parsed.rows.length} qator topildi.';
       });
@@ -92,7 +95,7 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
   Future<void> _doImport() async {
     if (_file == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avval CSV fayl tanlang')));
+          const SnackBar(content: Text('Avval CSV yoki XLSX fayl tanlang')));
       return;
     }
     final token = context.read<AuthProvider>().token!;
@@ -103,16 +106,18 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
       _busy = true;
       _errors = [];
       _created = 0;
+      _updated = 0;
       _status = 'Import boshlanmoqda...';
     });
     try {
-      final parsed = await service.parseCsv(file: _file);
+      final parsed = await service.parseCsvOrXlsx(file: _file);
       final res = await service.importProducts(parsed);
       setState(() {
         _created = res.createdIds.length;
+        _updated = res.updatedCount;
         _errors = res.errors;
         _status =
-            'Import yakunlandi. Yaratilgan: ${res.createdIds.length}, xatolar: ${res.errors.length}';
+            'Import yakunlandi. Yaratilgan: ${res.createdIds.length}, yangilangan: ${res.updatedCount}, xatolar: ${res.errors.length}';
       });
     } catch (e) {
       setState(() {
@@ -132,7 +137,7 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
     final canImport = role == 'admin' || role == 'accountant';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Mahsulot importi (CSV)')),
+      appBar: AppBar(title: const Text('Mahsulot importi (CSV/XLSX)')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: canImport
@@ -140,20 +145,20 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                      'CSV format: name, category_name, size, price_usd, unit, image_url, supplier_name, barcode'),
+                      'Ustunlar: supplier, category, name, barcode, type, size, color, qty_ok, qty_defect, cost_price_usd, sale_price_usd, amount_usd, is_active'),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       ElevatedButton.icon(
                         onPressed: _busy ? null : _downloadTemplate,
                         icon: const Icon(Icons.download),
-                        label: const Text('Shablon yuklab olish'),
+                        label: const Text('Shablon yuklab olish (.xlsx)'),
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton.icon(
-                        onPressed: _busy ? null : _pickCsv,
+                        onPressed: _busy ? null : _pickFile,
                         icon: const Icon(Icons.attach_file),
-                        label: const Text('CSV tanlash'),
+                        label: const Text('CSV/XLSX tanlash'),
                       ),
                     ],
                   ),
@@ -193,7 +198,8 @@ class _ProductImportScreenState extends State<ProductImportScreen> {
                           style: const TextStyle(fontWeight: FontWeight.w500)),
                     ),
                   const SizedBox(height: 8),
-                  if (_created > 0) Text('Yaratilgan mahsulotlar: $_created'),
+                  if (_created > 0 || _updated > 0)
+                    Text('Yaratildi: $_created   •   Yangilandi: $_updated'),
                   const SizedBox(height: 8),
                   if (_errors.isNotEmpty)
                     const Text('Xatolar:',

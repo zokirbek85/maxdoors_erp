@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
+import '../dealers/dealer_debt_detail_screen.dart';
+import '../dealers/dealer_debt_screen.dart';
 
 class DealersListScreen extends StatefulWidget {
   const DealersListScreen({super.key});
@@ -593,6 +595,17 @@ class _DealersListScreenState extends State<DealersListScreen> {
                           onLongPress: _canEdit
                               ? () => _createOrEditDealer(existing: it)
                               : null,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => DealerDebtDetailScreen(
+                                  dealerId: id,
+                                  dealerName: name.isEmpty ? id : name,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       );
                     },

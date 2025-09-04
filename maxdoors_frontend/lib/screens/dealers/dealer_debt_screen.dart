@@ -4,257 +4,8 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../widgets/loading.dart';
+import 'dealer_debt_detail_screen.dart';
 
-/// =========================
-///  DETAIL: DealerDebtDetail
-/// =========================
-class _Txn {
-  final DateTime date;
-  final String type; // 'order' | 'payment'
-  final String ref;
-  final double amountUsd; // order: +, payment: - (qarzni kamaytiradi)
-  _Txn({
-    required this.date,
-    required this.type,
-    required this.ref,
-    required this.amountUsd,
-  });
-}
-
-class DealerDebtDetailScreen extends StatefulWidget {
-  final String dealerId;
-  final String dealerName;
-  const DealerDebtDetailScreen({
-    super.key,
-    required this.dealerId,
-    required this.dealerName,
-  });
-
-  @override
-  State<DealerDebtDetailScreen> createState() => _DealerDebtDetailScreenState();
-}
-
-class _DealerDebtDetailScreenState extends State<DealerDebtDetailScreen> {
-  bool _loading = true;
-  String _error = '';
-  List<_Txn> _txns = [];
-  double _opening = 0.0;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetch();
-  }
-
-  double _toDouble(dynamic v) {
-    if (v == null) return 0.0;
-    if (v is num) return v.toDouble();
-    return double.tryParse(v.toString().replaceAll(',', '.')) ?? 0.0;
-  }
-
-  DateTime _parseDate(dynamic v) {
-    if (v is String) {
-      final d = DateTime.tryParse(v);
-      if (d != null) return d;
-    }
-    return DateTime.now();
-  }
-
-  String _fmtUsd(num v) => '\$${v.toStringAsFixed(2)}';
-
-  Future<void> _fetch() async {
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
-    try {
-      final token = context.read<AuthProvider>().token!;
-      final dealerId = widget.dealerId;
-      final txns = <_Txn>[];
-
-      // Orders (not canceled)
-      {
-        int page = 1;
-        final filter =
-            "dealer='$dealerId' && (status!='canceled' && status!='cancelled')";
-        while (true) {
-          final url =
-              "collections/orders/records?perPage=200&page=$page&filter=${Uri.encodeComponent(filter)}";
-          final res = await ApiService.get(url, token: token);
-          final items = (res['items'] as List?) ?? const [];
-          if (items.isEmpty) break;
-
-          for (final o in items) {
-            final m = o as Map<String, dynamic>;
-            final totalFields = [
-              'total_usd',
-              'grand_total_usd',
-              'grand_total',
-              'totalUSD',
-              'total'
-            ];
-            double? tot;
-            for (final f in totalFields) {
-              if (m.containsKey(f)) {
-                tot = _toDouble(m[f]);
-                break;
-              }
-            }
-            tot ??= 0.0;
-
-            final ref = (m['dailyNumber'] ??
-                    m['number'] ??
-                    m['daily_number'] ??
-                    m['id'])
-                .toString();
-            final dt = _parseDate(m['created'] ?? m['ts'] ?? m['date']);
-
-            txns.add(_Txn(date: dt, type: 'order', ref: ref, amountUsd: tot));
-          }
-
-          final total = (res['totalItems'] as num?)?.toInt() ?? items.length;
-          if (page * 200 >= total) break;
-          page++;
-          if (page > 200) break;
-        }
-      }
-
-      // Payments
-      Future<void> pull(String coll) async {
-        int page = 1;
-        final filter = "dealer='$dealerId'";
-        while (true) {
-          final url =
-              "collections/$coll/records?perPage=200&page=$page&filter=${Uri.encodeComponent(filter)}";
-          final res = await ApiService.get(url, token: token);
-          final items = (res['items'] as List?) ?? const [];
-          if (items.isEmpty) break;
-
-          for (final p in items) {
-            final m = p as Map<String, dynamic>;
-            double amt = 0.0;
-            for (final f in ['amount_usd', 'amountUSD', 'amount', 'paid_usd']) {
-              if (m.containsKey(f)) {
-                amt = _toDouble(m[f]);
-                break;
-              }
-            }
-            final ref = (m['ref'] ?? m['id']).toString();
-            final dt = _parseDate(m['created'] ?? m['ts'] ?? m['date']);
-            txns.add(_Txn(
-              date: dt,
-              type: 'payment',
-              ref: ref,
-              amountUsd: -amt, // minus = qarzni kamaytiradi
-            ));
-          }
-
-          final total = (res['totalItems'] as num?)?.toInt() ?? items.length;
-          if (page * 200 >= total) break;
-          page++;
-          if (page > 200) break;
-        }
-      }
-
-      for (final c in ['payments', 'dealer_payments', 'receipts']) {
-        try {
-          await pull(c);
-          break;
-        } catch (_) {}
-      }
-
-      txns.sort((a, b) => a.date.compareTo(b.date));
-      setState(() => _txns = txns);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Running balance
-    final running = <double>[];
-    double cur = _opening;
-    for (final t in _txns) {
-      cur += t.amountUsd;
-      running.add(cur);
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('${widget.dealerName} — qarzdorlik detali'),
-        actions: [
-          IconButton(onPressed: _fetch, icon: const Icon(Icons.refresh))
-        ],
-      ),
-      body: _loading
-          ? const Loading(text: 'Yuklanmoqda...')
-          : _error.isNotEmpty
-              ? Center(child: Text('Xato: $_error'))
-              : _txns.isEmpty
-                  ? const Center(child: Text('Ma’lumot yo‘q'))
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: _txns.length + 1,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        if (i == 0) {
-                          return ListTile(
-                            leading: const Icon(Icons.flag),
-                            title: const Text('Boshlang‘ich qoldiq'),
-                            trailing: Text(
-                              _fmtUsd(_opening),
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          );
-                        }
-                        final t = _txns[i - 1];
-                        final bal = running[i - 1];
-                        final isOrder = t.type == 'order';
-                        final color = isOrder
-                            ? Colors.red.shade700
-                            : Colors.green.shade700;
-                        final sign = isOrder ? '+' : '−';
-                        return ListTile(
-                          leading: Icon(
-                            isOrder ? Icons.shopping_bag : Icons.payments,
-                            color: color,
-                          ),
-                          title: Text(
-                            isOrder ? 'Buyurtma ${t.ref}' : 'To‘lov ${t.ref}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          subtitle: Text('${t.date.toLocal()}'
-                              .split('.')
-                              .first
-                              .replaceFirst('T', '  ')),
-                          trailing: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '$sign ${_fmtUsd(t.amountUsd.abs())}',
-                                style: TextStyle(
-                                    color: color, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 4),
-                              Text('Qoldiq: ${_fmtUsd(bal)}',
-                                  style: const TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-    );
-  }
-}
-
-/// =========================
-///  LIST: DealerDebtScreen
-/// =========================
 class DealerDebtScreen extends StatefulWidget {
   const DealerDebtScreen({super.key});
 
@@ -266,6 +17,7 @@ class _DealerDebtScreenState extends State<DealerDebtScreen> {
   bool _loading = true;
   String _error = '';
   List<Map<String, dynamic>> _dealers = [];
+  String _role = 'manager'; // default
 
   @override
   void initState() {
@@ -284,26 +36,18 @@ class _DealerDebtScreenState extends State<DealerDebtScreen> {
       final token = auth.token!;
       final managerId = (auth.userId ?? '').trim();
 
-      final filters = <String>[
-        "assigned_manager='$managerId'",
-        "manager='$managerId'",
-        "manager_id='$managerId'",
-      ];
+      // 1) Rolni aniqlash: avval provider’dan, bo‘lmasa users/{id} dan o‘qiymiz
+      _role = await _resolveRole(auth, token);
 
-      Map<String, dynamic>? res;
-      for (final f in filters) {
-        try {
-          final url =
-              "collections/dealers/records?perPage=200&sort=name&filter=${Uri.encodeComponent(f)}";
-          res = await ApiService.get(url, token: token);
-          break;
-        } catch (_) {}
+      // 2) Rolga qarab dillerlarni olish
+      List<Map<String, dynamic>> dealers;
+      if (_role == 'admin' || _role == 'accountant') {
+        dealers = await _fetchAllDealers(token);
+      } else {
+        dealers = await _fetchDealersByManager(token, managerId);
       }
 
-      final dealers =
-          List<Map<String, dynamic>>.from((res?['items'] as List?) ?? const []);
-
-      // Har bir diller uchun qarzdorlikni aniqlash
+      // 3) Qarzdorlikni to‘ldirish (agar maydon bo‘lmasa — hisoblab beramiz)
       final out = <Map<String, dynamic>>[];
       for (final d in dealers) {
         final m = Map<String, dynamic>.from(d);
@@ -323,7 +67,73 @@ class _DealerDebtScreenState extends State<DealerDebtScreen> {
     }
   }
 
-  // helpers
+  /// AuthProvider’da `role` bo‘lmasa, users/{id} dan olib kelamiz.
+  Future<String> _resolveRole(AuthProvider auth, String token) async {
+    final r = (auth.role ?? '').toString().trim().toLowerCase();
+    if (r.isNotEmpty) return r;
+
+    final uid = (auth.userId ?? '').trim();
+    if (uid.isNotEmpty) {
+      try {
+        final u = await ApiService.get(
+          "collections/users/records/$uid",
+          token: token,
+        );
+        final role =
+            (u['role'] ?? u['data']?['role'] ?? '').toString().toLowerCase();
+        if (role.isNotEmpty) return role;
+      } catch (_) {
+        // bekor qilamiz, default manager bo‘ladi
+      }
+    }
+    return 'manager';
+  }
+
+  // ===================== FETCH HELPERS =====================
+
+  Future<List<Map<String, dynamic>>> _fetchAllDealers(String token) async {
+    final out = <Map<String, dynamic>>[];
+    int page = 1;
+    while (true) {
+      final url =
+          "collections/dealers/records?perPage=200&page=$page&sort=name";
+      final res = await ApiService.get(url, token: token);
+      final items =
+          List<Map<String, dynamic>>.from((res['items'] as List?) ?? const []);
+      out.addAll(items);
+
+      final total = (res['totalItems'] as num?)?.toInt() ?? out.length;
+      if (out.length >= total || items.isEmpty) break;
+      page++;
+      if (page > 200) break; // guard
+    }
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchDealersByManager(
+      String token, String managerId) async {
+    final filters = <String>[
+      "assigned_manager='$managerId'",
+      "manager='$managerId'",
+      "manager_id='$managerId'",
+    ];
+
+    Map<String, dynamic>? res;
+    for (final f in filters) {
+      try {
+        final url =
+            "collections/dealers/records?perPage=200&sort=name&filter=${Uri.encodeComponent(f)}";
+        res = await ApiService.get(url, token: token);
+        if ((res['items'] as List?)?.isNotEmpty == true) break;
+      } catch (_) {}
+    }
+
+    return List<Map<String, dynamic>>.from(
+        (res?['items'] as List?) ?? const []);
+  }
+
+  // ===================== DEBT UTILS =====================
+
   double _toDouble(dynamic v) {
     if (v == null) return 0.0;
     if (v is num) return v.toDouble();
@@ -338,12 +148,6 @@ class _DealerDebtScreenState extends State<DealerDebtScreen> {
   }
 
   String _fmtUsd(num v) => '\$${v.toStringAsFixed(2)}';
-
-  String _fmtDebt(Map<String, dynamic> d) {
-    final direct = _readDebtField(d);
-    final debt = direct ?? _toDouble(d['_computed_debt_usd']);
-    return _fmtUsd(debt);
-  }
 
   Future<double> _computeDealerDebtUsd(String dealerId, String token) async {
     final ordersTotal = await _sumOrdersTotalUsd(dealerId, token);
@@ -382,9 +186,8 @@ class _DealerDebtScreenState extends State<DealerDebtScreen> {
         }
         if (tot == null || tot == 0) {
           tot = await _calcOrderTotalFromItems(o['id'].toString(), token);
-          final dt = (o['discountType'] ?? o['discount_type'] ?? 'none')
-              .toString()
-              .toLowerCase();
+          final dt =
+              (o['discountType'] ?? o['discount_type'] ?? 'none').toString();
           final dv = _toDouble(o['discountValue'] ?? o['discount_value']);
           if (dt == 'percent' && dv > 0) {
             tot = tot - (tot * dv / 100.0);
@@ -484,11 +287,15 @@ class _DealerDebtScreenState extends State<DealerDebtScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final titleText = (_role == 'admin' || _role == 'accountant')
+        ? "Barcha dillerlar — qarzdorlik"
+        : "Mening dillerlarim — qarzdorlik";
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Mening dillerlarim — qarzdorlik"),
+        title: Text(titleText),
         actions: [
-          IconButton(onPressed: _fetch, icon: const Icon(Icons.refresh))
+          IconButton(onPressed: _fetch, icon: const Icon(Icons.refresh)),
         ],
       ),
       body: _loading

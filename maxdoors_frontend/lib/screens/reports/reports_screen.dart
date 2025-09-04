@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -9,16 +10,17 @@ import '../../services/api_service.dart';
 
 /// Reports & Analytics (Orders + Payments + Products)
 /// - KPI: revenue, payments, net-debt, orders count
+/// - YANGI: Orders status KPI (created/edit_requested/editable/packed/shipped)
 /// - Filters: date range, region, manager, dealer
 /// - Charts:
 ///   1) Monthly Sales (USD) – Line
 ///   2) Monthly Payments (USD) – Bar
-///   3) Top Dealers (USD) – Pie (+ quick dealer filter)
+///   3) Top Dealers (USD) – Pie (drill-down qo‘shildi)
 ///   4) Top Products (USD) – Bar
 ///   5) Selected Product Trend (USD by month) – Line
 ///
 /// Eslatma:
-/// - PB’da agregatsiya yo‘qligi uchun ma’lumotlar sahifalab olinadi va frontendda hisoblanadi.
+/// - PB’da agregatsiya yo‘qligi uchun ko‘p joyda totalItems asosida sanoq olinadi.
 /// - UZS to‘lov: amount / fx_rate -> USD.
 
 class ReportsScreen extends StatefulWidget {
@@ -40,6 +42,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String? _managerId;
   String? _dealerId;
 
+  // debounce
+  Timer? _debounce;
+  void _scheduleReload() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), _bootstrap);
+  }
+
   // dropdown options
   List<Map<String, dynamic>> _regions = [];
   List<Map<String, dynamic>> _managers = [];
@@ -54,6 +63,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   double _paymentsUsd = 0;
   int _ordersCount = 0;
   double get _netDebt => _revenueUsd - _paymentsUsd;
+
+  // MoM/YoY (Savdo)
+  double? _momPct;
+  double? _yoyPct;
 
   // sales/payments by month
   Map<String, double> _salesByMonth = {}; // "YYYY-MM" -> USD
@@ -70,13 +83,40 @@ class _ReportsScreenState extends State<ReportsScreen> {
       {}; // productId -> { "YYYY-MM" : usd }
   String? _selectedProductId; // trend uchun
 
+  // ----------- ORDERS STATUS KPI -----------
+  static const List<String> _orderStatuses = [
+    'created',
+    'edit_requested',
+    'editable',
+    'packed',
+    'shipped',
+  ];
+
+  static const Map<String, String> _statusUz = {
+    'created': 'Yangi',
+    'edit_requested': "O'zgartirish so‘ralgan",
+    'editable': "O'zgartirish mumkin",
+    'packed': 'Yig‘ilgan',
+    'shipped': 'Jo‘natilgan',
+  };
+
+  Map<String, int> _orderStatusCounts = {}; // status -> count
+  int _orderStatusTotal = 0;
+
   final _fmtMonth = DateFormat('yyyy-MM');
   final _fmtHuman = DateFormat('dd.MM.yyyy');
+  final _fmtMoney = NumberFormat.compactCurrency(symbol: '\$');
 
   @override
   void initState() {
     super.initState();
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -89,6 +129,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       await _loadDropdowns(token);
       await _loadData(token);
       await _compute(token);
+      await _loadOrderStatusKpi(token); // <-- status KPI
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -119,35 +160,47 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _dealers = List<Map<String, dynamic>>.from(d['items'] as List);
   }
 
-  Future<void> _loadData(String token) async {
-    final orderFilters = <String>[];
-    final payFilters = <String>[];
-
+  // --- Foydalaniladigan filterlarni (orders/payments uchun) bir joyda yig‘amiz
+  List<String> _orderFilterParts() {
+    final parts = <String>[];
     final fromIso = _from.toUtc().toIso8601String();
-    final toIso = _to
-        .add(const Duration(days: 1))
-        .toUtc()
-        .toIso8601String(); // end-exclusive
-    orderFilters.add("created>='$fromIso'");
-    orderFilters.add("created<'$toIso'");
-    payFilters.add("created>='$fromIso'");
-    payFilters.add("created<'$toIso'");
-
+    final toIso =
+        _to.add(const Duration(days: 1)).toUtc().toIso8601String(); // end-excl
+    parts.add("created>='$fromIso'");
+    parts.add("created<'$toIso'");
     if (_regionId != null && _regionId!.isNotEmpty) {
-      orderFilters.add("region='$_regionId'");
-      payFilters.add("region='$_regionId'");
+      parts.add("region='$_regionId'");
     }
     if (_managerId != null && _managerId!.isNotEmpty) {
-      orderFilters.add("manager='$_managerId'");
-      // payments’da manager bo‘lmasligi mumkin — qo‘shmaymiz
+      parts.add("manager='$_managerId'");
     }
     if (_dealerId != null && _dealerId!.isNotEmpty) {
-      orderFilters.add("dealer='$_dealerId'");
-      payFilters.add("dealer='$_dealerId'");
+      parts.add("dealer='$_dealerId'");
     }
+    return parts;
+  }
 
-    final orderFilterStr = Uri.encodeComponent(orderFilters.join(' && '));
-    final payFilterStr = Uri.encodeComponent(payFilters.join(' && '));
+  List<String> _paymentFilterParts() {
+    final parts = <String>[];
+    final fromIso = _from.toUtc().toIso8601String();
+    final toIso =
+        _to.add(const Duration(days: 1)).toUtc().toIso8601String(); // end-excl
+    parts.add("created>='$fromIso'");
+    parts.add("created<'$toIso'");
+    if (_regionId != null && _regionId!.isNotEmpty) {
+      parts.add("region='$_regionId'");
+    }
+    if (_dealerId != null && _dealerId!.isNotEmpty) {
+      parts.add("dealer='$_dealerId'");
+    }
+    return parts;
+  }
+
+  Future<void> _loadData(String token) async {
+    final orderFilterStr =
+        Uri.encodeComponent(_orderFilterParts().join(' && '));
+    final payFilterStr =
+        Uri.encodeComponent(_paymentFilterParts().join(' && '));
 
     _orders = await _fetchAll(
       path: 'collections/orders/records',
@@ -209,6 +262,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _productQtyTotal.clear();
     _productNames.clear();
     _productUsdByMonth.clear();
+    _momPct = null;
+    _yoyPct = null;
 
     // ---------- Orders (with items) ----------
     double revenue = 0.0;
@@ -317,11 +372,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
         (o) => o['dealer']?.toString() == dealerId,
         orElse: () => {},
       );
-      final exp = anyOrder['expand'];
+      final exp = anyOrder is Map ? anyOrder['expand'] : null;
       if (exp is Map && exp['dealer'] is Map) {
         label = (exp['dealer']['name']?.toString() ?? dealerId);
       }
-      slices.add(_DealerSlice(label: label, usd: entry.value));
+      slices.add(_DealerSlice(id: dealerId, label: label, usd: entry.value));
     }
     slices.sort((a, b) => b.usd.compareTo(a.usd));
     _topDealers = slices.take(8).toList();
@@ -333,11 +388,163 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _selectedProductId ??= top.first.key;
     }
 
+    // ---------- KPI set + MoM/YoY ----------
+    _computeMoMYoY();
+
     setState(() {
       _revenueUsd = revenue;
       _paymentsUsd = pays;
     });
   }
+
+  void _computeMoMYoY() {
+    // Current month according to _to
+    final nowYm = '${_to.year}-${_to.month.toString().padLeft(2, '0')}';
+    // Prev month
+    final prevDate = DateTime(_to.year, _to.month - 1, 1);
+    final prevYm =
+        '${prevDate.year}-${prevDate.month.toString().padLeft(2, '0')}';
+    // YoY month
+    final yoyDate = DateTime(_to.year - 1, _to.month, 1);
+    final yoyYm = '${yoyDate.year}-${yoyDate.month.toString().padLeft(2, '0')}';
+
+    final curr = _salesByMonth[nowYm];
+    final prev = _salesByMonth[prevYm];
+    final lastY = _salesByMonth[yoyYm];
+
+    double? mom, yoy;
+    if (curr != null && prev != null && prev > 0) {
+      mom = ((curr / prev) - 1.0) * 100.0;
+    }
+    if (curr != null && lastY != null && lastY > 0) {
+      yoy = ((curr / lastY) - 1.0) * 100.0;
+    }
+    _momPct = mom;
+    _yoyPct = yoy;
+  }
+
+  // ===================== ORDERS STATUS KPI (totalItems orqali) =====================
+
+  Future<int> _countOrders(String token, {String? status}) async {
+    final parts = _orderFilterParts();
+    if (status != null && status.isNotEmpty) {
+      parts.add("status='$status'");
+    }
+    final filterStr = parts.isEmpty
+        ? ''
+        : '&filter=${Uri.encodeComponent(parts.join(' && '))}';
+    final url =
+        'collections/orders/records?page=1&perPage=1&fields=id$filterStr';
+    final res = await ApiService.get(url, token: token);
+    return (res['totalItems'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> _loadOrderStatusKpi(String token) async {
+    final total = await _countOrders(token);
+    final map = <String, int>{};
+    for (final s in _orderStatuses) {
+      map[s] = await _countOrders(token, status: s);
+    }
+    setState(() {
+      _orderStatusCounts = map;
+      _orderStatusTotal = total;
+    });
+  }
+
+  Color _statusColor(String s) {
+    switch (s) {
+      case 'created':
+        return Colors.blue.shade500;
+      case 'edit_requested':
+        return Colors.orange.shade700;
+      case 'editable':
+        return Colors.teal.shade600;
+      case 'packed':
+        return Colors.deepPurple.shade500;
+      case 'shipped':
+        return Colors.green.shade600;
+      default:
+        return Colors.grey.shade600;
+    }
+  }
+
+  // Stable color per ID
+  Color _colorForId(String id) {
+    final h = id.hashCode & 0x00FFFFFF;
+    return Color(0xFF000000 | h);
+  }
+
+  Widget _ordersStatusKpiCard() {
+    final total = _orderStatusTotal == 0 ? 1 : _orderStatusTotal;
+    return _card(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.stacked_bar_chart_outlined),
+              const SizedBox(width: 8),
+              const Text('Buyurtmalar — statuslar bo‘yicha',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const Spacer(),
+              Text('Jami: $_orderStatusTotal ta',
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.primary)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ..._orderStatuses.map((s) {
+            final count = _orderStatusCounts[s] ?? 0;
+            final pct = count / total;
+            final uz = _statusUz[s] ?? s;
+            final color = _statusColor(s);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: color.withOpacity(0.35)),
+                        ),
+                        child: Text(
+                          uz,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Text('$count ta  •  ${(pct * 100).toStringAsFixed(1)}%'),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: pct.clamp(0, 1),
+                      minHeight: 8,
+                      color: color,
+                      backgroundColor: color.withOpacity(0.08),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // =========================== UI ===========================
 
   Future<void> _pickFrom() async {
     final d = await showDatePicker(
@@ -348,7 +555,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
     if (d != null) {
       setState(() => _from = d);
-      _bootstrap();
+      _scheduleReload();
     }
   }
 
@@ -361,7 +568,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
     if (d != null) {
       setState(() => _to = d);
-      _bootstrap();
+      _scheduleReload();
     }
   }
 
@@ -441,7 +648,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     ],
                     onChanged: (v) {
                       setState(() => _regionId = v);
-                      _bootstrap();
+                      _scheduleReload();
                     },
                   ),
                 ),
@@ -469,7 +676,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     ],
                     onChanged: (v) {
                       setState(() => _managerId = v);
-                      _bootstrap();
+                      _scheduleReload();
                     },
                   ),
                 ),
@@ -493,7 +700,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     ],
                     onChanged: (v) {
                       setState(() => _dealerId = v);
-                      _bootstrap(); // filterni qo‘llab qayta yuklaymiz
+                      _scheduleReload(); // debounce bilan qayta yuklash
                     },
                   ),
                 ),
@@ -514,14 +721,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  // KPI row
+                  // KPI row (money + count)
                   Row(
                     children: [
                       _kpiCard(context,
                           title: 'Savdo (USD)',
                           value: _revenueUsd,
                           icon: Icons.attach_money,
-                          color: Colors.indigo),
+                          color: Colors.indigo,
+                          mom: _momPct,
+                          yoy: _yoyPct),
                       const SizedBox(width: 12),
                       _kpiCard(context,
                           title: 'To‘lov (USD)',
@@ -543,6 +752,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           isInt: true),
                     ],
                   ),
+
+                  const SizedBox(height: 12),
+
+                  // YANGI: Orders status KPI (progress + count)
+                  _ordersStatusKpiCard(),
+
                   const SizedBox(height: 12),
 
                   // Sales & Payments charts
@@ -563,7 +778,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Top dealers (with quick dealer filter on header)
+                  // Top dealers (with quick dealer filter on header + drill-down)
                   _card(chartTopDealers()),
                   const SizedBox(height: 12),
 
@@ -602,9 +817,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
       required double value,
       required IconData icon,
       required Color color,
-      bool isInt = false}) {
-    final txt =
-        isInt ? value.toStringAsFixed(0) : '\$${value.toStringAsFixed(2)}';
+      bool isInt = false,
+      double? mom,
+      double? yoy}) {
+    final txt = isInt ? value.toStringAsFixed(0) : _fmtMoney.format(value);
+
+    Widget badge(String label, double? pct) {
+      if (pct == null) return const SizedBox.shrink();
+      final up = pct >= 0;
+      final bg = up ? Colors.green : Colors.red;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: bg.withOpacity(.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: bg.withOpacity(.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(up ? Icons.arrow_upward : Icons.arrow_downward,
+                size: 14, color: bg),
+            const SizedBox(width: 2),
+            Text('${pct.toStringAsFixed(1)}%',
+                style: TextStyle(color: bg, fontWeight: FontWeight.w700)),
+            Text(' $label', style: TextStyle(color: bg)),
+          ],
+        ),
+      );
+    }
+
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(14),
@@ -613,25 +855,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.black12),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CircleAvatar(
-              backgroundColor: color.withOpacity(0.12),
-              child: Icon(icon, color: color),
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: color.withOpacity(0.12),
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: Theme.of(context).textTheme.bodySmall),
+                      const SizedBox(height: 4),
+                      Text(txt,
+                          style: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 4),
-                  Text(txt,
-                      style: const TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.w800)),
-                ],
-              ),
-            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              badge('MoM', mom),
+              const SizedBox(width: 6),
+              badge('YoY', yoy),
+            ]),
           ],
         ),
       ),
@@ -675,7 +928,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               borderData: FlBorderData(show: true),
               titlesData: FlTitlesData(
                 leftTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: true, reservedSize: 42)),
+                    sideTitles: SideTitles(showTitles: true, reservedSize: 52)),
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                     showTitles: true,
@@ -732,7 +985,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               borderData: FlBorderData(show: true),
               titlesData: FlTitlesData(
                 leftTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: true, reservedSize: 42)),
+                    sideTitles: SideTitles(showTitles: true, reservedSize: 52)),
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                     showTitles: true,
@@ -759,7 +1012,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  // 3) Top dillerlar (Pie) + quick “Diller” filtri
+  // 3) Top dillerlar (Pie) + quick “Diller” filtri + DRILL-DOWN (tap)
   Widget chartTopDealers() {
     final data = _topDealers;
     final hasData = data.isNotEmpty;
@@ -788,7 +1041,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
         sections.add(
           PieChartSectionData(
             value: d.usd,
+            color: _colorForId(d.id),
             title: '${pct.toStringAsFixed(0)}%',
+            titleStyle: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
             radius: 60 + min(40, (d.usd / (sum == 0 ? 1 : sum)) * 40),
             badgeWidget: Padding(
               padding: const EdgeInsets.all(4.0),
@@ -809,6 +1065,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
             sectionsSpace: 2,
             centerSpaceRadius: 32,
             sections: sections,
+            pieTouchData: PieTouchData(
+              enabled: true,
+              touchCallback: (evt, resp) {
+                if (resp == null || resp.touchedSection == null) return;
+                final idx = resp.touchedSection!.touchedSectionIndex;
+                if (idx < 0 || idx >= data.length) return;
+                final tapped = data[idx].id;
+                setState(() {
+                  // toggle: shu diller bo‘yicha filtrlash / tozalash
+                  _dealerId = (_dealerId == tapped) ? null : tapped;
+                });
+                _scheduleReload();
+              },
+            ),
           ),
         ),
       );
@@ -835,7 +1105,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 items: dealerItems,
                 onChanged: (v) {
                   setState(() => _dealerId = v);
-                  _bootstrap();
+                  _scheduleReload();
                 },
               ),
             ),
@@ -846,7 +1116,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 icon: const Icon(Icons.clear),
                 onPressed: () {
                   setState(() => _dealerId = null);
-                  _bootstrap();
+                  _scheduleReload();
                 },
               ),
           ],
@@ -872,10 +1142,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     final groups = <BarChartGroupData>[];
     for (var i = 0; i < top.length; i++) {
+      final id = top[i].key;
       groups.add(
         BarChartGroupData(
           x: i,
-          barRods: [BarChartRodData(toY: top[i].value)],
+          barRods: [
+            BarChartRodData(
+              toY: top[i].value,
+              color: _colorForId(id),
+            )
+          ],
           showingTooltipIndicators: const [0],
         ),
       );
@@ -896,7 +1172,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               barGroups: groups,
               titlesData: FlTitlesData(
                 leftTitles: AxisTitles(
-                  sideTitles: SideTitles(showTitles: true, reservedSize: 42),
+                  sideTitles: SideTitles(showTitles: true, reservedSize: 52),
                 ),
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
@@ -974,7 +1250,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     titlesData: FlTitlesData(
                       leftTitles: AxisTitles(
                         sideTitles:
-                            SideTitles(showTitles: true, reservedSize: 42),
+                            SideTitles(showTitles: true, reservedSize: 52),
                       ),
                       bottomTitles: AxisTitles(
                         sideTitles: SideTitles(
@@ -1006,6 +1282,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         isCurved: true,
                         dotData: FlDotData(show: false),
                         barWidth: 3,
+                        color: _colorForId(pid),
                       ),
                     ],
                   ),
@@ -1049,7 +1326,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             return DataRow(cells: [
               DataCell(Text('${i + 1}')),
               DataCell(Text(name, overflow: TextOverflow.ellipsis)),
-              DataCell(Text('\$${usd.toStringAsFixed(2)}')),
+              DataCell(Text(_fmtMoney.format(usd))),
               DataCell(Text(qty.toStringAsFixed(2))),
             ]);
           }),
@@ -1060,7 +1337,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 }
 
 class _DealerSlice {
+  final String id;
   final String label;
   final double usd;
-  _DealerSlice({required this.label, required this.usd});
+  _DealerSlice({required this.id, required this.label, required this.usd});
 }

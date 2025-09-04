@@ -9,6 +9,66 @@ import '../../widgets/loading.dart';
 import 'order_item_add_screen.dart';
 import '../../services/pdf_service.dart';
 
+// ===== Helpers to safely read dynamic Order fields =====
+String? _getStr(dynamic v) => v == null ? null : v.toString();
+
+String? _humanIdAny(Order o) {
+  final d = o as dynamic;
+  dynamic v;
+  try {
+    v = d.humanId;
+  } catch (_) {}
+  if (v == null) {
+    try {
+      v = d.human_id;
+    } catch (_) {}
+  }
+  final s = _getStr(v)?.trim();
+  return (s == null || s.isEmpty) ? null : s;
+}
+
+dynamic _dailySeqAny(Order o) {
+  final d = o as dynamic;
+  dynamic v;
+  try {
+    v = d.dailySeq;
+  } catch (_) {}
+  if (v == null) {
+    try {
+      v = d.daily_seq;
+    } catch (_) {}
+  }
+  if (v == null) {
+    try {
+      v = d.dailyNumber;
+    } catch (_) {}
+  }
+  if (v == null) {
+    try {
+      v = d.daily_number;
+    } catch (_) {}
+  }
+  return v;
+}
+
+// Uzbek labels for statuses
+String _statusUz(String? s) {
+  switch ((s ?? '').toLowerCase()) {
+    case 'created':
+      return 'Yangi';
+    case 'edit_requested':
+      return "O'zgartirish so‘ralgan";
+    case 'editable':
+      return "O'zgartirish mumkin";
+    case 'packed':
+      return 'Yig‘ilgan';
+    case 'shipped':
+      return 'Jo‘natilgan';
+    default:
+      return '-';
+  }
+}
+
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
   const OrderDetailScreen({super.key, required this.orderId});
@@ -74,6 +134,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return (_isManager || _isAdminOrAcc) && st == 'editable';
   }
 
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
   Future<void> _fetch() async {
     setState(() {
       _loading = true;
@@ -113,8 +179,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
       await _fetch();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Status: $status')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Status: ${_statusUz(status)}')));
       }
     } catch (e) {
       if (mounted) {
@@ -124,13 +190,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  Future<void> _requestEdit() async {
-    await _setStatus('edit_requested');
-  }
-
-  Future<void> _resendToWarehouse() async {
-    await _setStatus('created');
-  }
+  Future<void> _requestEdit() async => _setStatus('edit_requested');
+  Future<void> _resendToWarehouse() async => _setStatus('created');
 
   Future<void> _deleteItem(String id) async {
     final ok = await showDialog<bool>(
@@ -175,60 +236,52 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  /// "XXX-dd.mm.yyyy" ko‘rinishida ko‘rsatish
-  String _displayDaily(Order o) {
-    String? raw = o.dailyNumber ?? o.number;
-    int? seq;
-    if (raw != null && RegExp(r'^\d+$').hasMatch(raw)) {
-      seq = int.tryParse(raw);
-    } else if (raw != null) {
-      final m = RegExp(r'(\d{1,4})$').firstMatch(raw);
-      if (m != null) seq = int.tryParse(m.group(1)!);
+  /// Sarlavha ko‘rinishi (human_id > daily_seq+date > number+date > id)
+  String _orderHuman(Order o) {
+    final human = (_humanIdAny(o) ?? '').trim();
+    if (human.isNotEmpty) return human;
+
+    DateTime? created;
+    if ((o.created ?? '').isNotEmpty) {
+      created = DateTime.tryParse(o.created!)?.toLocal();
     }
-    DateTime? dt;
-    try {
-      dt = DateTime.tryParse(o.created ?? '');
-    } catch (_) {}
     String datePart = '';
-    if (dt != null) {
-      final dd = dt.day.toString().padLeft(2, '0');
-      final mm = dt.month.toString().padLeft(2, '0');
-      final yyyy = dt.year.toString().padLeft(4, '0');
+    if (created != null) {
+      final dd = created.day.toString().padLeft(2, '0');
+      final mm = created.month.toString().padLeft(2, '0');
+      final yyyy = created.year.toString();
       datePart = '$dd.$mm.$yyyy';
     }
-    if (seq != null && datePart.isNotEmpty) {
+
+    int? seq;
+    final rawSeq = _dailySeqAny(o);
+    if (rawSeq is num) {
+      seq = rawSeq.toInt();
+    } else if (rawSeq is String) {
+      seq = int.tryParse(rawSeq);
+    }
+
+    if (seq != null && seq > 0 && datePart.isNotEmpty) {
       return '${seq.toString().padLeft(3, '0')}-$datePart';
     }
-    if (datePart.isNotEmpty && (o.number ?? '').isNotEmpty) {
-      return '${o.number}-$datePart';
+
+    final number = (o.number ?? '').trim();
+    if (number.isNotEmpty && datePart.isNotEmpty) {
+      return '$number-$datePart';
     }
-    return o.numberOrId;
-  }
 
-  @override
-  void initState() {
-    super.initState();
-    _fetch();
-  }
-
-  Future<void> _openAddItem() async {
-    final added = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-          builder: (_) => OrderItemAddScreen(orderId: widget.orderId)),
-    );
-    if (added == true && mounted) _fetch();
+    return o.id;
   }
 
   @override
   Widget build(BuildContext context) {
-    final dailyTitle =
-        (!_loading && _order != null) ? _displayDaily(_order!) : null;
+    final titleText = (!_loading && _order != null)
+        ? _orderHuman(_order!)
+        : 'Buyurtma detali';
 
     return Scaffold(
       appBar: AppBar(
-        // Sarlavha: kunlik raqam + sana
-        title: Text(dailyTitle ?? 'Buyurtma detali'),
+        title: Text(titleText),
         actions: [
           if (!_loading && _order != null && _isWarehouse)
             IconButton(
@@ -293,7 +346,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   border: Border.all(
                                       color: Colors.blueGrey.shade200),
                                 ),
-                                child: Text('Status: ${_order!.status ?? "-"}'),
+                                child: Text(
+                                    'Status: ${_statusUz(_order!.status)}'),
                               ),
                             ],
                           ),
@@ -307,7 +361,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 ElevatedButton.icon(
                                   onPressed: _requestEdit,
                                   icon: const Icon(Icons.edit_calendar),
-                                  label: const Text('Request edit'),
+                                  label: const Text('O‘zgartirish so‘rash'),
                                 ),
                               ],
                             ),
@@ -317,7 +371,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 ElevatedButton.icon(
                                   onPressed: _resendToWarehouse,
                                   icon: const Icon(Icons.send),
-                                  label: const Text('Re-send to warehouse'),
+                                  label: const Text('Omborga qayta yuborish'),
                                 ),
                               ],
                             ),
@@ -359,7 +413,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               return ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: const Icon(Icons.inventory_2),
-                                title: Text(name!),
+                                title: Text(name ?? '-'),
                                 subtitle: Text(
                                     'Qty: $qty  •  \$${price.toStringAsFixed(2)}'),
                                 trailing: trailingDelete,
@@ -405,12 +459,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           if (_isWarehouse) ...[
                             ElevatedButton(
                               onPressed: () => _setStatus('packed'),
-                              child: const Text('Packed'),
+                              child: const Text('Yig‘ilgan (Packed)'),
                             ),
                             const SizedBox(height: 8),
                             ElevatedButton(
                               onPressed: () => _setStatus('shipped'),
-                              child: const Text('Shipped'),
+                              child: const Text('Jo‘natilgan (Shipped)'),
                             ),
                             const SizedBox(height: 8),
                             ElevatedButton.icon(
@@ -423,5 +477,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       ),
                     ),
     );
+  }
+
+  Future<void> _openAddItem() async {
+    final added = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OrderItemAddScreen(orderId: widget.orderId),
+      ),
+    );
+    if (added == true && mounted) _fetch();
   }
 }

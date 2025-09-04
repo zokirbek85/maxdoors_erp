@@ -25,12 +25,86 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   // filter/search
   final _searchCtrl = TextEditingController();
   String _query = '';
-  String _status =
-      'all'; // all | created | edit_requested | editable | packed | shipped
+  // all | created | edit_requested | editable | packed | shipped
+  String _status = 'all';
   String _sort = '-created';
 
   String get _basePath =>
       'collections/orders/records?perPage=$_perPage&page=$_page&sort=$_sort&expand=dealer,region,manager,warehouse';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch(resetPage: true);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // ===== Helpers to safely read dynamic Order fields =====
+  String? _getStr(dynamic v) => v == null ? null : v.toString();
+
+  String? _humanIdAny(Order o) {
+    final d = o as dynamic;
+    dynamic v;
+    try {
+      v = d.humanId;
+    } catch (_) {}
+    v ??= () {
+      try {
+        return (o as dynamic).human_id;
+      } catch (_) {
+        return null;
+      }
+    }();
+    final s = _getStr(v)?.trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  dynamic _dailySeqAny(Order o) {
+    final d = o as dynamic;
+    dynamic v;
+    try {
+      v = d.dailySeq;
+    } catch (_) {}
+    if (v == null) {
+      try {
+        v = d.daily_seq;
+      } catch (_) {}
+    }
+    if (v == null) {
+      try {
+        v = d.dailyNumber;
+      } catch (_) {}
+    }
+    if (v == null) {
+      try {
+        v = d.daily_number;
+      } catch (_) {}
+    }
+    return v;
+  }
+
+  // Uzbek labels for statuses
+  String _statusUz(String? s) {
+    switch ((s ?? '').toLowerCase()) {
+      case 'created':
+        return 'Yangi';
+      case 'edit_requested':
+        return "O'zgartirish so‘ralgan";
+      case 'editable':
+        return "O'zgartirish mumkin";
+      case 'packed':
+        return 'Yig‘ilgan';
+      case 'shipped':
+        return 'Jo‘natilgan';
+      default:
+        return '-';
+    }
+  }
 
   Future<void> _fetch({bool resetPage = false}) async {
     if (resetPage) _page = 1;
@@ -43,15 +117,17 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       final token = context.read<AuthProvider>().token!;
       final sb = StringBuffer(_basePath);
 
-      // filter’larni faqat kerak bo‘lsa qo‘shamiz
+      // filters
       final filters = <String>[];
       if (_status != 'all') {
         filters.add("status='$_status'");
       }
       if (_query.isNotEmpty) {
         final safe = _query.replaceAll("'", r"\'");
-        // expand.* bo‘yicha filter ishlamaydi → text maydonlar bilan qidiramiz
-        filters.add("(number~'$safe' || daily_number~'$safe' || note~'$safe')");
+        // human_id ni ham qidiruvga qo‘shamiz
+        filters.add(
+          "(human_id~'$safe' || number~'$safe' || daily_number~'$safe' || note~'$safe')",
+        );
       }
       if (filters.isNotEmpty) {
         sb.write('&filter=${Uri.encodeComponent(filters.join(' && '))}');
@@ -59,15 +135,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
       final url = sb.toString();
       final res = await ApiService.get(url, token: token);
-
-      // smoke-log
-      try {
-        final li = (res['items'] as List?) ?? const [];
-        final ti = (res['totalItems'] as num?)?.toInt() ?? li.length;
-        // ignore: avoid_print
-        print(
-            'ORDERS FETCH url="$url"  totalItems=$ti  items.length=${li.length}');
-      } catch (_) {}
 
       final items = ((res['items'] as List?) ?? [])
           .map((e) => Order.fromJson(e as Map<String, dynamic>))
@@ -86,20 +153,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
   Future<void> _refresh() => _fetch(resetPage: true);
 
-  @override
-  void initState() {
-    super.initState();
-    _fetch(resetPage: true);
-  }
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
   // === UI helpers ===
-  /// Status ranglari
   Color _statusColor(BuildContext context, String? status) {
     final s = (status ?? '').toLowerCase();
     final scheme = Theme.of(context).colorScheme;
@@ -124,41 +178,45 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     return c.withOpacity(0.12);
   }
 
-  /// "XXX-dd.mm.yyyy" ko‘rinishida daily number chiqarish
-  String _displayDaily(Order o) {
-    // seq: daily_number ustuvor → keyin number oxiridagi raqam → aks holda null
-    String? raw = o.dailyNumber ?? o.number;
-    int? seq;
+  /// "NNN-dd.MM.yyyy" sarlavha
+  /// 1) human_id bo‘lsa – o‘sha
+  /// 2) bo‘lmasa: daily_seq + created dan formatlab
+  /// 3) bo‘lmasa: number + created
+  /// 4) bo‘lmasa: id
+  String _orderHuman(Order o) {
+    final human = (_humanIdAny(o) ?? '').trim();
+    if (human.isNotEmpty) return human;
 
-    if (raw != null && RegExp(r'^\d+$').hasMatch(raw)) {
-      seq = int.tryParse(raw);
-    } else if (raw != null) {
-      final m = RegExp(r'(\d{1,4})$').firstMatch(raw);
-      if (m != null) seq = int.tryParse(m.group(1)!);
+    DateTime? created;
+    if ((o.created ?? '').isNotEmpty) {
+      created = DateTime.tryParse(o.created!)?.toLocal();
     }
-
-    // sana: created dan
-    DateTime? dt;
-    try {
-      dt = DateTime.tryParse(o.created ?? '');
-    } catch (_) {}
     String datePart = '';
-    if (dt != null) {
-      final dd = dt.day.toString().padLeft(2, '0');
-      final mm = dt.month.toString().padLeft(2, '0');
-      final yyyy = dt.year.toString().padLeft(4, '0');
+    if (created != null) {
+      final dd = created.day.toString().padLeft(2, '0');
+      final mm = created.month.toString().padLeft(2, '0');
+      final yyyy = created.year.toString();
       datePart = '$dd.$mm.$yyyy';
     }
 
-    if (seq != null && datePart.isNotEmpty) {
+    int? seq;
+    final rawSeq = _dailySeqAny(o);
+    if (rawSeq is num) {
+      seq = rawSeq.toInt();
+    } else if (rawSeq is String) {
+      seq = int.tryParse(rawSeq);
+    }
+
+    if (seq != null && seq > 0 && datePart.isNotEmpty) {
       return '${seq.toString().padLeft(3, '0')}-$datePart';
     }
 
-    // fallback
-    if (datePart.isNotEmpty && (o.number ?? '').isNotEmpty) {
-      return '${o.number}-$datePart';
+    final number = (o.number ?? '').trim();
+    if (number.isNotEmpty && datePart.isNotEmpty) {
+      return '$number-$datePart';
     }
-    return o.numberOrId; // eng oxiri id
+
+    return o.id;
   }
 
   Widget _legend(BuildContext context) {
@@ -175,25 +233,25 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       children: entries.map((e) {
         final s = e[0] as String;
         final ic = e[1] as IconData;
+        final color = _statusColor(context, s);
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(ic, size: 16, color: _statusColor(context, s)),
+            Icon(ic, size: 16, color: color),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: _statusChipBg(context, s),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: _statusColor(context, s).withOpacity(0.35)),
+                border: Border.all(color: color.withOpacity(0.35)),
               ),
               child: Text(
-                s.toUpperCase(),
+                _statusUz(s).toUpperCase(),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: _statusColor(context, s),
+                  color: color,
                 ),
               ),
             ),
@@ -205,17 +263,14 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
   String _formatDate(String? iso) {
     if (iso == null || iso.isEmpty) return '-';
-    try {
-      final dt = DateTime.tryParse(iso) ?? DateTime.now();
-      final y = dt.year.toString().padLeft(4, '0');
-      final m = dt.month.toString().padLeft(2, '0');
-      final d = dt.day.toString().padLeft(2, '0');
-      final hh = dt.hour.toString().padLeft(2, '0');
-      final mm = dt.minute.toString().padLeft(2, '0');
-      return '$y-$m-$d $hh:$mm';
-    } catch (_) {
-      return iso;
-    }
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return iso;
+    final y = dt.year.toString().padLeft(4, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$y-$m-$d $hh:$mm';
   }
 
   Widget _pill(BuildContext context, IconData icon, String text) {
@@ -230,9 +285,10 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
         children: [
           Icon(icon, size: 14),
           const SizedBox(width: 6),
-          Text(text,
-              style:
-                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+          Text(
+            text,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
         ],
       ),
     );
@@ -258,8 +314,9 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
         ),
         actions: [
           IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () => _fetch(resetPage: true)),
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _fetch(resetPage: true),
+          ),
         ],
       ),
       body: Column(
@@ -279,17 +336,24 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                       border: OutlineInputBorder(),
                     ),
                     items: const [
-                      DropdownMenuItem(value: 'all', child: Text('All')),
+                      DropdownMenuItem(value: 'all', child: Text('Hammasi')),
+                      DropdownMenuItem(value: 'created', child: Text('Yangi')),
                       DropdownMenuItem(
-                          value: 'created', child: Text('Created')),
+                        value: 'edit_requested',
+                        child: Text("O'zgartirish so‘ralgan"),
+                      ),
                       DropdownMenuItem(
-                          value: 'edit_requested',
-                          child: Text('Edit requested')),
+                        value: 'editable',
+                        child: Text("O'zgartirish mumkin"),
+                      ),
                       DropdownMenuItem(
-                          value: 'editable', child: Text('Editable')),
-                      DropdownMenuItem(value: 'packed', child: Text('Packed')),
+                        value: 'packed',
+                        child: Text('Yig‘ilgan'),
+                      ),
                       DropdownMenuItem(
-                          value: 'shipped', child: Text('Shipped')),
+                        value: 'shipped',
+                        child: Text('Jo‘natilgan'),
+                      ),
                     ],
                     onChanged: (v) {
                       setState(() => _status = v ?? 'all');
@@ -302,7 +366,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                   child: TextField(
                     controller: _searchCtrl,
                     decoration: const InputDecoration(
-                      hintText: 'Qidirish (raqam / izoh)',
+                      hintText: 'Qidirish (raqam / human_id / izoh)',
                       prefixIcon: Icon(Icons.search),
                       isDense: true,
                       border: OutlineInputBorder(),
@@ -326,10 +390,13 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child:
-                Align(alignment: Alignment.centerLeft, child: _legend(context)),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _legend(context),
+            ),
           ),
           const SizedBox(height: 6),
+
           if (_loading) const LinearProgressIndicator(),
           if (_error.isNotEmpty)
             Padding(
@@ -337,6 +404,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
               child: Text('Xato: $_error',
                   style: const TextStyle(color: Colors.red)),
             ),
+
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refresh,
@@ -353,8 +421,8 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                      builder: (_) =>
-                                          const OrderCreateScreen()),
+                                    builder: (_) => const OrderCreateScreen(),
+                                  ),
                                 ).then((_) => _fetch(resetPage: true));
                               },
                               icon: const Icon(Icons.add),
@@ -377,8 +445,9 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                  builder: (_) =>
-                                      OrderDetailScreen(orderId: o.id)),
+                                builder: (_) =>
+                                    OrderDetailScreen(orderId: o.id),
+                              ),
                             ).then((_) => _fetch()); // qaytganda yangilash
                           },
                           child: Container(
@@ -417,12 +486,12 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          // yuqori qat: daily number + status chip + sana
+                                          // yuqori qat: sarlavha + status chip + sana
                                           Row(
                                             children: [
                                               Expanded(
                                                 child: Text(
-                                                  _displayDaily(o),
+                                                  _orderHuman(o),
                                                   style: const TextStyle(
                                                     fontSize: 16,
                                                     fontWeight: FontWeight.w700,
@@ -432,18 +501,20 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                                               Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4),
+                                                  horizontal: 8,
+                                                  vertical: 4,
+                                                ),
                                                 decoration: BoxDecoration(
                                                   color: bg,
                                                   borderRadius:
                                                       BorderRadius.circular(8),
                                                   border: Border.all(
-                                                      color: color
-                                                          .withOpacity(0.35)),
+                                                    color:
+                                                        color.withOpacity(0.35),
+                                                  ),
                                                 ),
                                                 child: Text(
-                                                  (o.status ?? '-')
+                                                  _statusUz(o.status)
                                                       .toUpperCase(),
                                                   style: TextStyle(
                                                     fontSize: 12,
@@ -505,6 +576,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                     ),
             ),
           ),
+
           // Pagination
           if (_total > _perPage)
             Padding(
