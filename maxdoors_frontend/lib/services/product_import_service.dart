@@ -168,7 +168,9 @@ class ProductImportService {
     String nameField = ProductFields.refNameField,
   }) async {
     final key = name.trim().toLowerCase();
-    if (cache.containsKey(key)) return cache[key]!;
+    if (cache.containsKey(key)) {
+      return cache[key]!;
+    }
     if (!createMissingRefs) {
       throw StateError("'$name' ($collection) topilmadi");
     }
@@ -315,7 +317,9 @@ class ProductImportService {
   // -------------------- Upsert helpers --------------------------------------
 
   Future<Map<String, dynamic>?> _findProductByBarcode(String barcode) async {
-    if (barcode.isEmpty) return null;
+    if (barcode.isEmpty) {
+      return null;
+    }
     final filter = "barcode='$barcode'";
     final res = await ApiService.get(
       'collections/products/records?perPage=1&page=1&filter=${Uri.encodeComponent(filter)}',
@@ -323,12 +327,16 @@ class ProductImportService {
     );
     final items =
         List<Map<String, dynamic>>.from((res['items'] as List?) ?? []);
-    if (items.isEmpty) return null;
+    if (items.isEmpty) {
+      return null;
+    }
     return items.first;
   }
 
   Future<Map<String, dynamic>?> _findProductByName(String name) async {
-    if (name.isEmpty) return null;
+    if (name.isEmpty) {
+      return null;
+    }
     final safe = name.replaceAll("'", r"\'");
     final filter = "name='$safe'";
     final res = await ApiService.get(

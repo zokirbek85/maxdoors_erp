@@ -11,7 +11,9 @@ class PdfService {
   static pw.Font? _bold;
 
   static Future<void> _ensureFonts() async {
-    if (_base != null && _bold != null) return;
+    if (_base != null && _bold != null) {
+      return;
+    }
 
     Future<pw.Font> _load(String path) async {
       final data = await rootBundle.load(path);

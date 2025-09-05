@@ -94,7 +94,9 @@ class AuthService {
     for (final k in keys) {
       if (data.containsKey(k) && data[k] != null) {
         final v = data[k].toString().trim();
-        if (v.isNotEmpty) return v;
+        if (v.isNotEmpty) {
+          return v;
+        }
       }
     }
     return null;
