@@ -201,7 +201,10 @@ class ProductImportService {
   Future<_ParsedProductsSheet> _parseCsv({List<int>? bytes, File? file}) async {
     final content = bytes != null
         ? utf8.decode(bytes)
-        : await file!.readAsString(encoding: const Utf8Codec());
+        : await file?.readAsString(encoding: const Utf8Codec()) ?? '';
+    if (content.isEmpty) {
+      throw StateError('CSV bo'sh yoki o'qilib bo'lmadi');
+    }
     final rows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false)
         .convert(content);
     if (rows.isEmpty) throw StateError('CSV bo‘sh');
